@@ -422,29 +422,45 @@ seed();
 // only. On a fresh install — no matching knowledge rows — the questions are
 // seeded from the file alone. The currency-unit question is pre-answered
 // («ریال», management's recorded decision), so 19 of 20 start open.
-function migrateQuestions() {
-  let seedList;
+function loadQuestionsSeed() {
   try {
-    seedList = require('../data/questions-seed.json');
+    const list = require('../data/questions-seed.json');
+    return Array.isArray(list) && list.length ? list : null;
   } catch (e) {
-    console.warn('[db] questions-seed.json could not be loaded — questions migration skipped:', e.message);
-    return;
+    console.warn('[db] questions-seed.json could not be loaded:', e.message);
+    return null;
   }
-  if (!Array.isArray(seedList) || !seedList.length) return;
+}
+
+// Insert the full seed set into an (empty) questions table and return how
+// many were inserted. The currency-unit question is pre-answered («ریال»),
+// so a fresh seed always yields 20 questions, 19 of them open.
+function seedQuestions() {
+  const seedList = loadQuestionsSeed();
+  if (!seedList) return 0;
+  const ins = db.prepare('INSERT INTO questions (group_name, question, answer, status, answered_at) VALUES (?,?,?,?,?)');
+  for (const q of seedList) {
+    ins.run(
+      q.group_name || '',
+      q.question,
+      q.answer || null,
+      q.status || 'در انتظار پاسخ',
+      q.answer ? new Date().toISOString() : null
+    );
+  }
+  return seedList.length;
+}
+
+function migrateQuestions() {
+  const seedList = loadQuestionsSeed();
+  if (!seedList) return;
   const existing = db.prepare('SELECT COUNT(*) AS c FROM questions').get().c;
   if (existing > 0) return;
-  const ins = db.prepare('INSERT INTO questions (group_name, question, answer, status, answered_at) VALUES (?,?,?,?,?)');
   const delByTitle = db.prepare('DELETE FROM knowledge_entries WHERE title = ?');
   const work = () => {
+    seedQuestions();
     let removed = 0;
     for (const q of seedList) {
-      ins.run(
-        q.group_name || '',
-        q.question,
-        q.answer || null,
-        q.status || 'در انتظار پاسخ',
-        q.answer ? new Date().toISOString() : null
-      );
       if (q.source_title) removed += delByTitle.run(q.source_title).changes;
     }
     console.log(`[db] questions migration: seeded ${seedList.length} questions, removed ${removed} question entries from knowledge`);
@@ -454,8 +470,39 @@ function migrateQuestions() {
 
 migrateQuestions();
 
+// ---------- Factory reset (agent-only, POST /api/agent/reset) ----------
+// Wipes every business-data table back to day one in a single transaction:
+// intake events, the three registers, ledgers, customers, products, tasks,
+// questions, knowledge and the audit log. The users table is NEVER touched,
+// so the admin login survives. Afterwards the 20 management questions are
+// reseeded from data/questions-seed.json (19 open, currency question
+// pre-answered «ریال»). Delete order matters: the registers reference
+// events(id), so children are deleted before events.
+const RESET_TABLES = [
+  'expenses', 'income', 'payroll', 'events', 'ledger_items', 'customers',
+  'products', 'tasks', 'questions', 'knowledge_entries', 'audit_log',
+];
+
+function resetAllData() {
+  const deleted = {};
+  let reseeded = 0;
+  const work = () => {
+    for (const t of RESET_TABLES) {
+      deleted[t] = db.prepare(`SELECT COUNT(*) AS c FROM ${t}`).get().c;
+      db.exec(`DELETE FROM ${t}`);
+    }
+    try {
+      const names = RESET_TABLES.map((t) => `'${t}'`).join(',');
+      db.exec(`DELETE FROM sqlite_sequence WHERE name IN (${names})`);
+    } catch (_) { /* sqlite_sequence may not exist — ids just keep counting */ }
+    reseeded = seedQuestions();
+  };
+  if (typeof db.transaction === 'function') db.transaction(work)(); else work();
+  return { deleted, questions_reseeded: reseeded };
+}
+
 module.exports = {
   db, REGISTERS, EVENT_TYPE_TO_REGISTER, pickColumns, insertRegisterRow,
   listRegisterRows, classifyEvent, analyticsSummary, audit, toIntAmount,
-  validateReceiptImage, RECEIPT_IMAGE_MAX,
+  validateReceiptImage, RECEIPT_IMAGE_MAX, resetAllData,
 };
