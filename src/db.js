@@ -320,10 +320,17 @@ function classifyEvent(eventId, input, actor) {
 }
 
 function analyticsSummary() {
-  const sum = (t) => db.prepare(`SELECT COALESCE(SUM(amount_rial),0) AS s, COUNT(*) AS c FROM ${t}`).get();
-  const exp = sum('expenses');
-  const inc = sum('income');
-  const pay = sum('payroll');
+  // Aggregate the dashboard's review metrics in SQL instead of transferring
+  // hundreds of register rows (and their potentially large receipt images).
+  const registerSummary = (table) => db.prepare(`SELECT
+    COALESCE(SUM(amount_rial), 0) AS s, COUNT(*) AS c,
+    COALESCE(SUM(CASE WHEN COALESCE(review_status, '') != 'تأیید شده' THEN 1 ELSE 0 END), 0) AS attention,
+    COALESCE(SUM(CASE WHEN COALESCE(review_status, '') LIKE '%تکراری%' THEN amount_rial ELSE 0 END), 0) AS duplicates,
+    COALESCE(SUM(CASE WHEN receipt_status = 'ندارد' THEN 1 ELSE 0 END), 0) AS no_receipt
+    FROM ${table}`).get();
+  const exp = registerSummary('expenses');
+  const inc = registerSummary('income');
+  const pay = registerSummary('payroll');
   const byCategory = db.prepare(
     "SELECT COALESCE(NULLIF(category,''),'بدون دسته') AS category, COALESCE(SUM(amount_rial),0) AS total, COUNT(*) AS count FROM expenses GROUP BY category ORDER BY total DESC"
   ).all();
@@ -350,6 +357,7 @@ function analyticsSummary() {
       questions_total: db.prepare('SELECT COUNT(*) AS c FROM questions').get().c,
       questions_open: db.prepare("SELECT COUNT(*) AS c FROM questions WHERE status != 'پاسخ داده شد'").get().c,
     },
+    review: { duplicate_expenses_rial: exp.duplicates, expenses_without_receipt: exp.no_receipt, attention_count: exp.attention + inc.attention + pay.attention },
     events: counts,
     unclear_count: unclear,
     expenses_by_category: byCategory,

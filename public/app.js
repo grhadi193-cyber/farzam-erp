@@ -151,7 +151,7 @@ $('#unit-toggle').addEventListener('click', (e) => {
 });
 
 $('#refresh-btn').addEventListener('click', () => {
-  loadBadges();
+  if (currentTab !== 'dashboard') loadBadges();
   loadTab(currentTab);
 });
 
@@ -194,7 +194,6 @@ function showApp() {
   const roleFa = { admin: 'مدیر', finance: 'مالی', employee: 'کارمند', viewer: 'مشاهده‌گر' };
   $('#user-info').textContent = `${currentUser.name} — ${roleFa[currentUser.role] || currentUser.role}`;
   applyUnitUI();
-  loadBadges();
   loadTab('dashboard');
 }
 
@@ -206,9 +205,18 @@ $('#tabs').addEventListener('click', (e) => {
   loadTab(btn.dataset.tab);
 });
 
-const loaded = {};
+const descriptions = { dashboard: 'نمایی کلی از وضعیت کسب‌وکار شما، در یک نگاه.', intake: 'رویدادهای مالی را ثبت و پیگیری کنید.', monitoring: 'شاخص‌ها و کیفیت داده‌های مالی را بررسی کنید.', expenses: 'ثبت و بررسی هزینه‌های کسب‌وکار.', income: 'درآمدهای ثبت‌شده را مدیریت کنید.', payroll: 'پرداخت‌ها و اطلاعات حقوق و دستمزد.', ledgers: 'دریافتنی‌ها، پرداختنی‌ها و چک‌ها در یکجا.', customers: 'اطلاعات مشتریان خود را مدیریت کنید.', products: 'فهرست کالاها و اطلاعات آن‌ها.', tasks: 'کارهای تیم را پیگیری و مدیریت کنید.', questions: 'پرسش‌ها و تصمیم‌های مالی مدیریت.', knowledge: 'قوانین و دانش سازمانی در یکجا.' };
 function loadTab(name) {
   currentTab = name;
+  const tab = $(`#tabs [data-tab="${name}"]`);
+  if (tab) {
+    $$('#tabs .tab').forEach((t) => t.classList.toggle('active', t === tab));
+    const title = tab.childNodes[1].textContent.trim();
+    $('#page-title').textContent = title;
+    $('#content-title').textContent = title;
+    $('#breadcrumb-title').textContent = title;
+    $('#page-description').textContent = descriptions[name] || '';
+  }
   $$('main .panel').forEach((p) => p.classList.add('hidden'));
   $('#tab-' + name).classList.remove('hidden');
   const loaders = {
@@ -237,32 +245,21 @@ async function loadDashboard() {
     // Panel definitions: هزینه قطعی = gross expenses minus duplicate-pending rows
     // (review_status includes «تکراری»); موارد نیازمند پیگیری = register rows across
     // expenses+income+payroll whose review_status is not «تأیید شده».
-    let confirmedExp = t.expenses_rial;
-    let attentionCount = s.unclear_count;
-    let dupTotal = 0;
-    let noReceiptCount = 0;
-    try {
-      const expRows = await api('/api/registers/expenses');
-      dupTotal = expRows.filter((r) => String(r.review_status || '').includes('تکراری'))
-        .reduce((a, r) => a + Number(r.amount_rial || 0), 0);
-      confirmedExp = t.expenses_rial - dupTotal;
-      noReceiptCount = expRows.filter((r) => r.receipt_status === 'ندارد').length;
-      try {
-        const incRows = await api('/api/registers/income');
-        const payRows = await api('/api/registers/payroll');
-        attentionCount = [...expRows, ...incRows, ...payRows]
-          .filter((r) => r.review_status !== 'تأیید شده').length;
-      } catch (_) { /* attention count falls back to analytics unclear_count */ }
-    } catch (_) { /* confirmed expenses fall back to the analytics gross total */ }
+    const dupTotal = s.review.duplicate_expenses_rial;
+    const confirmedExp = t.expenses_rial - dupTotal;
+    const attentionCount = s.review.attention_count;
+    const noReceiptCount = s.review.expenses_without_receipt;
     const netRial = t.income_rial - confirmedExp - t.payroll_rial;
     const kpi = (lbl, val, cap, cls = '') =>
       `<div class="kpi"><div class="kpi-lbl"><span class="kpi-dot ${cls}"></span>${lbl}</div><div class="kpi-num ${cls}">${val}</div><div class="kpi-cap">${cap}</div></div>`;
     el.innerHTML = `
+      <div class="dashboard-intro"><div><span class="dashboard-kicker">نمای کلی کسب‌وکار <span>✳</span></span><h2>سلام، ${esc(currentUser.name)} 👋</h2><p>خوش اومدی! اینجا همه‌چیز برای تصمیم‌های بهتر کنار هم قرار گرفته.</p></div><button type="button" class="btn intro-button" id="goto-intake">ثبت رویداد جدید <span>←</span></button></div>
+      <div class="section-heading"><div><span class="section-kicker">OVERVIEW</span><h2>وضعیت مالی</h2><p>خلاصه‌ای از اطلاعات ثبت‌شده در سامانه</p></div><span class="section-tag">اطلاعات کلی <b>✳</b></span></div>
       <div class="kpis">
         ${kpi('جمع هزینه‌های ثبت‌شده', faMoney(t.expenses_rial), `${faNum(c.expenses)} رکورد از ربات و پنل`, 'neg')}
         ${kpi('هزینه قطعی (بدون ردیف تکراری)', faMoney(confirmedExp), dupTotal ? `ردیف تکراری در انتظار تصمیم: ${faMoney(dupTotal)}` : 'ردیف تکراری در انتظار تصمیم نیست', 'neg')}
         ${kpi('جمع درآمدهای ثبت‌شده', faMoney(t.income_rial), c.income ? `${faNum(c.income)} رکورد` : 'هنوز رکوردی ثبت نشده', 'pos')}
-        ${kpi('تراز ثبت‌شده (درآمد − هزینه قطعی)', faMoney(netRial), 'مانده حساب‌ها نیست؛ فقط جمع همین ثبت‌هاست', netRial < 0 ? 'neg' : 'pos')}
+        ${kpi('تراز ثبت‌شده (درآمد − هزینه و حقوق)', faMoney(netRial), 'مانده حساب‌ها نیست؛ فقط جمع همین ثبت‌هاست', netRial < 0 ? 'neg' : 'pos')}
         ${kpi('جمع حقوق و دستمزد', faMoney(t.payroll_rial), c.payroll ? `${faNum(c.payroll)} رکورد` : 'هنوز رکوردی ثبت نشده')}
         ${kpi('جمع کل خروجی (هزینه قطعی + حقوق)', faMoney(confirmedExp + t.payroll_rial), 'کل پول خارج‌شده ثبت‌شده از شرکت', 'neg')}
         ${kpi('دریافتنی‌های باز', faMoney(rec.total), rec.count ? `${faNum(rec.count)} مورد باز` : 'طلب بازی ثبت نشده', 'pos')}
@@ -272,12 +269,13 @@ async function loadDashboard() {
         ${kpi('مشتریان', faNum(c.customers), `${faNum(c.customers_without_id || 0)} نفر بدون شناسه ملی`)}
         ${kpi('پرسش‌های باز مدیریت', faNum(c.questions_open || 0), `از ${faNum(c.questions_total || 0)} پرسش رسمی بخش مالی`, c.questions_open ? 'warn-num' : '')}
       </div>
+      <div class="section-heading charts-heading"><div><span class="section-kicker">INSIGHTS</span><h2>تحلیل و گزارش‌ها</h2><p>تصویر واضح‌تری از جریان مالی کسب‌وکار</p></div></div>
       <div class="intake-banner">
         <div class="banner-head">
           <h2>کانال یک‌پیامی شرکت — راحت‌ترین راه ارتباط مالی</h2>
-          <button type="button" class="btn primary" id="goto-intake">رفتن به ورودی یکپارچه</button>
+          <button type="button" class="btn primary" id="goto-intake-banner">رفتن به ورودی یکپارچه ←</button>
         </div>
-        <p>کارمند فقط یک پیام آزاد می‌فرستد — متن، و اگر دارد عکس رسید — از ربات تلگرام یا از تب «ورودی یکپارچه» همین پنل. سیستم خودش نوع رویداد را تشخیص می‌دهد، مبلغ را می‌خواند و در ماژول درست ثبت می‌کند؛ چیزی که نوعش قطعی نباشد حدس زده نمی‌شود و می‌رود به صف تصمیم شما.</p>
+        <p>کارمند فقط یک پیام آزاد می‌فرستد — متن، و اگر دارد عکس رسید — از ربات تلگرام یا از تب «ورودی یکپارچه» همین پنل. رویدادها در صف ورودی قرار می‌گیرند تا توسط تیم مالی یا ایجنت بررسی و در دفتر مناسب ثبت شوند.</p>
         <div class="chips">
           <div class="chip"><span class="badge bad">خرید / هزینه</span><p>«خریدیم ۵۰ رام کاغذ A4، دو میلیون و چهارصد هزار تومان، از کارت شرکت» + عکس رسید</p></div>
           <div class="chip"><span class="badge ok">فروش / وصولی</span><p>«فروختیم ۱۰ تا ردیاب GT08 به شرکت نمونه، فاکتور ۱۲۳، واریز شد به حساب شرکت»</p></div>
@@ -295,11 +293,7 @@ async function loadDashboard() {
       <div class="card" style="margin-top:12px"><h2 class="sec">دفاتر باز</h2>
         ${s.ledger_open.length ? `<table><tr><th>نوع</th><th>تعداد</th><th>جمع (${unitName()})</th></tr>${s.ledger_open.map((r) => `<tr><td>${ledgerKindFa(r.kind)}</td><td>${faNum(r.count)}</td><td>${faMoney(r.total)}</td></tr>`).join('')}</table>` : '<div class="empty">دفتر بازی وجود ندارد</div>'}
       </div>`;
-    const gi = $('#goto-intake', el);
-    if (gi) gi.addEventListener('click', () => {
-      $$('#tabs .tab').forEach((tb) => tb.classList.toggle('active', tb.dataset.tab === 'intake'));
-      loadTab('intake');
-    });
+    $$('#goto-intake, #goto-intake-banner', el).forEach((gi) => gi.addEventListener('click', () => loadTab('intake')));
   } catch (err) {
     el.innerHTML = `<div class="error">${esc(err.message)}</div>`;
   }
@@ -799,6 +793,8 @@ async function loadQuestions() {
     el.innerHTML = `<div class="error">${esc(err.message)}</div>`;
   }
 }
+
+$('#today').textContent = new Intl.DateTimeFormat('fa-IR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(new Date());
 
 // ---------- Boot ----------
 (async function boot() {
