@@ -146,6 +146,18 @@ CREATE TABLE IF NOT EXISTS products (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS bank_accounts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  bank TEXT,
+  branch TEXT,
+  iban TEXT,
+  account_no TEXT,
+  balance_rial INTEGER NOT NULL DEFAULT 0,
+  notes TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS knowledge_entries (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   title TEXT NOT NULL,
@@ -279,6 +291,24 @@ function listRegisterRows(kind, limit = 500) {
   return db.prepare(`SELECT * FROM ${REGISTERS[kind].table} ORDER BY id DESC LIMIT ?`).all(limit);
 }
 
+// ---------- Bank accounts ----------
+// balance_rial is the OPENING balance recorded when the account is created
+// (a snapshot, not a live bank feed); the analytics cash total sums these.
+function insertBankAccount(data) {
+  const b = data || {};
+  if (!b.name || !String(b.name).trim()) return { error: 'نام حساب لازم است' };
+  const balance = toIntAmount(b.balance_rial);
+  if (balance === null || balance < 0) return { error: 'مبلغ نامعتبر است' };
+  const info = db.prepare(
+    'INSERT INTO bank_accounts (name, bank, branch, iban, account_no, balance_rial, notes) VALUES (?,?,?,?,?,?,?)'
+  ).run(String(b.name), b.bank || '', b.branch || '', b.iban || '', b.account_no || '', balance, b.notes || '');
+  return { row: db.prepare('SELECT * FROM bank_accounts WHERE id = ?').get(info.lastInsertRowid) };
+}
+
+function listBankAccounts(limit = 500) {
+  return db.prepare('SELECT * FROM bank_accounts ORDER BY id DESC LIMIT ?').all(limit);
+}
+
 function audit(actor, action, entity, entityId) {
   db.prepare('INSERT INTO audit_log (actor, action, entity, entity_id) VALUES (?,?,?,?)')
     .run(actor, action, entity || null, entityId || null);
@@ -339,7 +369,12 @@ function analyticsSummary() {
   for (const r of eventCounts) counts[r.status] = r.c;
   const unclear = db.prepare("SELECT COUNT(*) AS c FROM events WHERE event_type = 'unclear' OR status = 'needs_review'").get().c;
   const ledgerOpen = db.prepare("SELECT kind, COALESCE(SUM(amount_rial),0) AS total, COUNT(*) AS count FROM ledger_items WHERE status = 'باز' GROUP BY kind").all();
+  const cashRow = db.prepare('SELECT COALESCE(SUM(balance_rial),0) AS s, COUNT(*) AS c FROM bank_accounts').get();
   return {
+    cash: {
+      accounts: cashRow.c,
+      total_rial: cashRow.s,
+    },
     totals: {
       expenses_rial: exp.s,
       income_rial: inc.s,
@@ -472,15 +507,15 @@ migrateQuestions();
 
 // ---------- Factory reset (agent-only, POST /api/agent/reset) ----------
 // Wipes every business-data table back to day one in a single transaction:
-// intake events, the three registers, ledgers, customers, products, tasks,
-// questions, knowledge and the audit log. The users table is NEVER touched,
+// intake events, the three registers, ledgers, customers, products, bank
+// accounts, tasks, questions, knowledge and the audit log. The users table is NEVER touched,
 // so the admin login survives. Afterwards the 20 management questions are
 // reseeded from data/questions-seed.json (19 open, currency question
 // pre-answered «ریال»). Delete order matters: the registers reference
 // events(id), so children are deleted before events.
 const RESET_TABLES = [
   'expenses', 'income', 'payroll', 'events', 'ledger_items', 'customers',
-  'products', 'tasks', 'questions', 'knowledge_entries', 'audit_log',
+  'products', 'bank_accounts', 'tasks', 'questions', 'knowledge_entries', 'audit_log',
 ];
 
 function resetAllData() {
@@ -503,6 +538,7 @@ function resetAllData() {
 
 module.exports = {
   db, REGISTERS, EVENT_TYPE_TO_REGISTER, pickColumns, insertRegisterRow,
-  listRegisterRows, classifyEvent, analyticsSummary, audit, toIntAmount,
+  listRegisterRows, insertBankAccount, listBankAccounts,
+  classifyEvent, analyticsSummary, audit, toIntAmount,
   validateReceiptImage, RECEIPT_IMAGE_MAX, resetAllData,
 };

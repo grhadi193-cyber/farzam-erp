@@ -235,6 +235,9 @@ async function loadDashboard() {
   try {
     const s = await api('/api/analytics/summary');
     renderBadges(s);
+    let bankAccounts = [];
+    try { bankAccounts = await api('/api/bank-accounts'); } catch (_) { /* bank section renders empty */ }
+    const cashTotal = bankAccounts.reduce((a, r) => a + Number(r.balance_rial || 0), 0);
     const t = s.totals;
     const c = s.counts;
     const lo = {};
@@ -292,6 +295,9 @@ async function loadDashboard() {
       </div>
       <div class="card" style="margin-top:12px"><h2 class="sec">دفاتر باز</h2>
         ${s.ledger_open.length ? `<table><tr><th>نوع</th><th>تعداد</th><th>جمع (${unitName()})</th></tr>${s.ledger_open.map((r) => `<tr><td>${ledgerKindFa(r.kind)}</td><td>${faNum(r.count)}</td><td>${faMoney(r.total)}</td></tr>`).join('')}</table>` : '<div class="empty">دفتر بازی وجود ندارد</div>'}
+      </div>
+      <div class="card" style="margin-top:12px"><h2 class="sec">حساب‌های بانکی</h2>
+        ${bankAccounts.length ? `<table><tr><th>حساب</th><th>بانک</th><th>مانده افتتاحیه (${unitName()})</th></tr>${bankAccounts.map((r) => `<tr><td>${esc(r.name)}</td><td>${esc(r.bank || '')}</td><td>${faMoney(r.balance_rial)}</td></tr>`).join('')}<tr><td colspan="2"><b>جمع نقد — مانده افتتاحیه حساب‌ها</b></td><td><b>${faMoney(cashTotal)}</b></td></tr></table>` : '<div class="empty">هنوز حساب بانکی ثبت نشده است</div>'}
       </div>`;
     $$('#goto-intake, #goto-intake-banner', el).forEach((gi) => gi.addEventListener('click', () => loadTab('intake')));
   } catch (err) {
