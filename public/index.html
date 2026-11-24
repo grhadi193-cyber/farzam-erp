@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>پنل ERP فرزام</title>
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+
+<!-- Login -->
+<div id="login-view" class="login-wrap">
+  <form id="login-form" class="login-card">
+    <h1>پنل ERP فرزام</h1>
+    <p class="muted">سامانه مالی یکپارچه — ورود کاربران</p>
+    <label>ایمیل
+      <input type="email" id="login-email" required autocomplete="username">
+    </label>
+    <label>رمز عبور
+      <input type="password" id="login-password" required autocomplete="current-password">
+    </label>
+    <button type="submit" class="btn primary block">ورود</button>
+    <div id="login-error" class="error"></div>
+  </form>
+</div>
+
+<!-- App -->
+<div id="app-view" class="hidden">
+  <header class="topbar">
+    <div class="brand">پنل ERP فرزام</div>
+    <div class="userbox">
+      <span id="user-info"></span>
+      <button id="logout-btn" class="btn small">خروج</button>
+    </div>
+  </header>
+
+  <nav class="tabs" id="tabs">
+    <button data-tab="dashboard" class="tab active">داشبورد</button>
+    <button data-tab="intake" class="tab">ورودی یکپارچه</button>
+    <button data-tab="expenses" class="tab">هزینه‌ها</button>
+    <button data-tab="income" class="tab">درآمدها</button>
+    <button data-tab="payroll" class="tab">حقوق</button>
+    <button data-tab="ledgers" class="tab">دفاتر و چک‌ها</button>
+    <button data-tab="customers" class="tab">مشتری‌ها</button>
+    <button data-tab="products" class="tab">کالاها</button>
+    <button data-tab="knowledge" class="tab">دانش و قوانین</button>
+  </nav>
+
+  <main>
+    <section id="tab-dashboard" class="panel"></section>
+    <section id="tab-intake" class="panel hidden"></section>
+    <section id="tab-expenses" class="panel hidden"></section>
+    <section id="tab-income" class="panel hidden"></section>
+    <section id="tab-payroll" class="panel hidden"></section>
+    <section id="tab-ledgers" class="panel hidden"></section>
+    <section id="tab-customers" class="panel hidden"></section>
+    <section id="tab-products" class="panel hidden"></section>
+    <section id="tab-knowledge" class="panel hidden"></section>
+  </main>
+
+  <footer class="foot muted">واحد پول: ریال — تاریخ‌ها: شمسی</footer>
+</div>
+
+<script src="/app.js"></script>
+</body>
+</html>
