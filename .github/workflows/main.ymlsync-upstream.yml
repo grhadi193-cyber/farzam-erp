@@ -1,0 +1,73 @@
+
+name: Sync Upstream
+
+on:
+  repository_dispatch:
+    types: [upstream-pushed]
+
+  schedule:
+    - cron: "*/5 * * * *"
+
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: upstream-sync-main
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout destination
+        uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email \
+            "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Fetch upstream
+        run: |
+          git remote add upstream \
+            https://github.com/grhadi193-cyber/farzam-erp.git
+          git fetch upstream main
+          git fetch origin main
+
+      - name: Check and merge safely
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git checkout -B main origin/main
+
+          if ! git merge-base main upstream/main >/dev/null; then
+            echo "::error::Unrelated histories. Manual review required."
+            exit 1
+          fi
+
+          if git merge-base --is-ancestor upstream/main main; then
+            echo "Already synchronized."
+            exit 0
+          fi
+
+          echo "New upstream commits detected."
+
+          if ! git merge --no-edit upstream/main; then
+            git merge --abort || true
+            echo "::error::Merge conflict. Manual resolution required."
+            exit 1
+          fi
+
+          echo "Merge completed successfully."
+
+      - name: Push synchronized main
+        run: |
+          git push origin HEAD:main
