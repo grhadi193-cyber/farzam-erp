@@ -215,13 +215,24 @@ async function loadDashboard() {
     const rec = lo.receivable || { total: 0, count: 0 };
     const pay = lo.payable || { total: 0, count: 0 };
     const chq = lo.cheque || { total: 0, count: 0 };
-    // Confirmed expenses (review_status تأیید شده) — the panel's «هزینه قطعی».
-    let confirmedExp = null;
+    // Panel definitions: هزینه قطعی = gross expenses minus duplicate-pending rows
+    // (review_status includes «تکراری»); موارد نیازمند پیگیری = register rows across
+    // expenses+income+payroll whose review_status is not «تأیید شده».
+    let confirmedExp = t.expenses_rial;
+    let attentionCount = s.unclear_count;
     try {
-      const rows = await api('/api/registers/expenses');
-      confirmedExp = rows.filter((r) => r.review_status === 'تأیید شده')
+      const expRows = await api('/api/registers/expenses');
+      const dupTotal = expRows.filter((r) => String(r.review_status || '').includes('تکراری'))
         .reduce((a, r) => a + Number(r.amount_rial || 0), 0);
-    } catch (_) { /* card is hidden if the register cannot be read */ }
+      confirmedExp = t.expenses_rial - dupTotal;
+      try {
+        const incRows = await api('/api/registers/income');
+        const payRows = await api('/api/registers/payroll');
+        attentionCount = [...expRows, ...incRows, ...payRows]
+          .filter((r) => r.review_status !== 'تأیید شده').length;
+      } catch (_) { /* attention count falls back to analytics unclear_count */ }
+    } catch (_) { /* confirmed expenses fall back to the analytics gross total */ }
+    const netRial = t.income_rial - confirmedExp - t.payroll_rial;
     const kpi = (lbl, val, cap, cls = '') =>
       `<div class="kpi"><div class="kpi-lbl"><span class="kpi-dot ${cls}"></span>${lbl}</div><div class="kpi-num ${cls}">${val}</div><div class="kpi-cap">${cap}</div></div>`;
     el.innerHTML = `
@@ -229,13 +240,13 @@ async function loadDashboard() {
         ${kpi('جمع هزینه‌های ثبت‌شده', faMoney(t.expenses_rial), `${faNum(c.expenses)} رکورد از ربات و پنل`, 'neg')}
         ${confirmedExp !== null ? kpi('هزینه قطعی (تأییدشده)', faMoney(confirmedExp), 'فقط ردیف‌های تأییدشده از جمع بالا', 'neg') : ''}
         ${kpi('جمع درآمدهای ثبت‌شده', faMoney(t.income_rial), c.income ? `${faNum(c.income)} رکورد` : 'هنوز رکوردی ثبت نشده', 'pos')}
-        ${kpi('تراز ثبت‌شده (درآمد − هزینه − حقوق)', faMoney(t.net_rial), 'مانده حساب‌ها نیست؛ فقط جمع همین ثبت‌هاست', t.net_rial < 0 ? 'neg' : 'pos')}
+        ${kpi('تراز ثبت‌شده (درآمد − هزینه − حقوق)', faMoney(netRial), 'مانده حساب‌ها نیست؛ فقط جمع همین ثبت‌هاست', netRial < 0 ? 'neg' : 'pos')}
         ${kpi('جمع حقوق و دستمزد', faMoney(t.payroll_rial), c.payroll ? `${faNum(c.payroll)} رکورد` : 'هنوز رکوردی ثبت نشده')}
-        ${kpi('جمع کل خروجی (هزینه + حقوق)', faMoney(t.expenses_rial + t.payroll_rial), 'کل پول خارج‌شده ثبت‌شده از شرکت', 'neg')}
+        ${kpi('جمع کل خروجی (هزینه + حقوق)', faMoney(confirmedExp + t.payroll_rial), 'کل پول خارج‌شده ثبت‌شده از شرکت', 'neg')}
         ${kpi('دریافتنی‌های باز', faMoney(rec.total), rec.count ? `${faNum(rec.count)} مورد باز` : 'طلب بازی ثبت نشده', 'pos')}
         ${kpi('پرداختنی‌های باز', faMoney(pay.total), pay.count ? `${faNum(pay.count)} مورد باز` : 'بدهی بازی ثبت نشده')}
         ${kpi('چک‌های در جریان', faNum(chq.count), `مجموع مبلغ: ${faMoney(chq.total)}`)}
-        ${kpi('موارد نیازمند پیگیری', faNum(s.unclear_count), `پردازش‌نشده: ${faNum(s.events.unprocessed)} — نیازمند بررسی: ${faNum(s.events.needs_review)}`, s.unclear_count ? 'warn-num' : '')}
+        ${kpi('موارد نیازمند پیگیری', faNum(attentionCount), `پردازش‌نشده: ${faNum(s.events.unprocessed)} — نیازمند بررسی: ${faNum(s.events.needs_review)}`, attentionCount ? 'warn-num' : '')}
         ${kpi('مشتریان', faNum(c.customers), 'مشتری ثبت‌شده در داده‌های پایه')}
         ${kpi('کالاها', faNum(c.products), 'کالای ثبت‌شده در داده‌های پایه')}
       </div>
