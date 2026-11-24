@@ -1,1 +1,20 @@
-{"dependencies":{"bcryptjs":"^2.4.3","libsql":"^0.5.0","express":"^4.21.2","jsonwebtoken":"^9.0.2"},"description":"Farzam ERP — standalone server version (Persian RTL finance panel with agent API)","engines":{"node":">=18"},"main":"server.js","name":"farzam-erp-server","private":true,"scripts":{"start":"node server.js"},"version":"0.1.0"}
+{
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "libsql": "^0.5.0",
+    "express": "^4.21.2",
+    "jsonwebtoken": "^9.0.2"
+  },
+  "description": "Farzam ERP — standalone server version (Persian RTL finance panel with agent API)",
+  "engines": {
+    "node": ">=18"
+  },
+  "main": "server.js",
+  "name": "farzam-erp-server",
+  "private": true,
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test"
+  },
+  "version": "0.1.0"
+}
