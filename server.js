@@ -319,6 +319,10 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'خطای داخلی سرور' });
 });
 
-app.listen(PORT, () => {
-  console.log(`Farzam ERP running at http://localhost:${PORT}`);
-});
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log(`Farzam ERP running at http://localhost:${PORT}`);
+  });
+}
+
+module.exports = app;

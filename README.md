@@ -74,3 +74,21 @@ npm start              # http://localhost:3000
 - هیچ رازی در کد نیست؛ همه از `.env` خوانده می‌شود و `.env` نباید کامیت شود.
 - کلید ایجنت را در چت نفرستید؛ از مسیر امن اتصال Muse تحویل دهید (نگاه کنید به docs/access-for-pip.md).
 - پشت HTTPS (دامنه + reverse proxy) اجرا کنید و `JWT_SECRET` و کلید ایجنت را تصادفی و بلند انتخاب کنید.
+
+## استقرار روی Vercel (ساده‌ترین راه)
+
+روی Vercel فایل دیتابیس لوکال ماندگار نیست؛ پس دیتابیس را روی Turso (رایگان) می‌گذاریم و اپ از راه دور به آن وصل می‌شود. کل کار حدود پنج دقیقه است:
+
+۱. **دیتابیس Turso:** در [turso.tech](https://turso.tech) ثبت‌نام کنید → Create Database → یک نام (مثلاً `farzam-erp`) → از صفحهٔ دیتابیس، `Database URL` (با `libsql://` شروع می‌شود) و یک `Auth Token` بگیرید.
+
+۲. **پروژه Vercel:** در [vercel.com](https://vercel.com) با حساب گیت‌هاب وارد شوید → Add New… → Project → مخزن `farzam-erp` را Import کنید (تنظیم خاصی لازم نیست؛ `vercel.json` داخل مخزن است).
+
+۳. **متغیرهای محیطی** (در همان صفحهٔ Import یا Settings → Environment Variables):
+   - `ADMIN_EMAIL` و `ADMIN_PASSWORD` — ورود اول مدیر
+   - `JWT_SECRET` — یک رشتهٔ تصادفی بلند
+   - `PIP_AGENT_API_KEY` — یک کلید تصادفی بلند برای ایجنت
+   - `TURSO_DATABASE_URL` و `TURSO_AUTH_TOKEN` — از قدم ۱
+
+۴. **Deploy** را بزنید. پنل روی آدرس `….vercel.app` بالا می‌آید و با ایمیل/رمز مدیر وارد می‌شوید.
+
+نکته‌ها: بدون دو متغیر Turso، داده‌ها روی Vercel ذخیره نمی‌مانند. روی پلن رایگان (Hobby) طبق قوانین Vercel استفادهٔ تجاری مجاز نیست؛ برای استفادهٔ واقعی شرکت، پلن Pro لازم است. مسیر Docker/VPS بدون Turso هم سر جایش است و با فایل داخلی کار می‌کند.

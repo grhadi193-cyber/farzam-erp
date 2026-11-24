@@ -1,16 +1,26 @@
 'use strict';
 const fs = require('fs');
 const path = require('path');
-const Database = require('better-sqlite3');
+const Database = require('libsql');
 const bcrypt = require('bcryptjs');
 
-const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '..', 'data');
-fs.mkdirSync(DATA_DIR, { recursive: true });
-const DB_PATH = process.env.DB_PATH || path.join(DATA_DIR, 'farzam.db');
-
-const db = new Database(DB_PATH);
-db.pragma('journal_mode = WAL');
-db.pragma('foreign_keys = ON');
+let db;
+if (process.env.TURSO_DATABASE_URL) {
+  // Remote libSQL (e.g. Turso) — for serverless hosts like Vercel, where the
+  // local filesystem does not persist between requests.
+  db = new Database(process.env.TURSO_DATABASE_URL, {
+    authToken: process.env.TURSO_AUTH_TOKEN || '',
+  });
+} else {
+  const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '..', 'data');
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+  const DB_PATH = process.env.DB_PATH || path.join(DATA_DIR, 'farzam.db');
+  db = new Database(DB_PATH);
+  try { db.pragma('journal_mode = WAL'); } catch (_) { /* not supported everywhere */ }
+}
+try { db.pragma('foreign_keys = ON'); } catch (_) {
+  try { db.exec('PRAGMA foreign_keys = ON'); } catch (_) { /* ignore */ }
+}
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS users (
