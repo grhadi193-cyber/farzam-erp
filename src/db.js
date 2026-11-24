@@ -199,6 +199,104 @@ CREATE TABLE IF NOT EXISTS audit_log (
 );
 `);
 
+// ---------- users table self-heal ----------
+// CREATE TABLE IF NOT EXISTS never alters an existing table, so a database
+// whose `users` table predates the current schema (e.g. an early version
+// with differently-named columns) keeps the old shape forever — and every
+// query against the new columns throws ("no such column: email"), which
+// surfaced in production as a 500 on POST /api/auth/login for EVERY login
+// attempt, even for nonexistent users. Repair at boot, before seed() runs:
+// if any required column is missing, rename the old table aside (it is
+// never dropped), create a fresh table with the current schema, and copy
+// over whatever columns exist in both. No other table is touched.
+const USERS_REQUIRED_COLUMNS = ['id', 'name', 'email', 'password_hash', 'role', 'created_at'];
+const USERS_CREATE_SQL = `
+CREATE TABLE users (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  email TEXT NOT NULL UNIQUE,
+  password_hash TEXT NOT NULL,
+  role TEXT NOT NULL DEFAULT 'viewer' CHECK (role IN ('admin','finance','employee','viewer')),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+)`;
+
+function repairUsersTable() {
+  let cols = null;
+  try { cols = db.pragma('table_info(users)'); } catch (e) {
+    console.warn('[db] users schema check failed:', e.message);
+    return;
+  }
+  if (!Array.isArray(cols) || cols.length === 0) {
+    // No users table at all (the CREATE TABLE IF NOT EXISTS above should
+    // have made one, but never leave login broken if it somehow did not).
+    try {
+      db.exec(USERS_CREATE_SQL);
+      console.warn('[db] users table was missing — created it with the current schema');
+    } catch (e) {
+      console.warn('[db] could not create the users table:', e.message);
+    }
+    return;
+  }
+  const existing = cols.map((c) => c.name);
+  const missing = USERS_REQUIRED_COLUMNS.filter((c) => !existing.includes(c));
+  if (missing.length === 0) return; // schema is current — nothing to do
+
+  // Pick a legacy name that is not already taken.
+  let legacy = 'users_legacy';
+  try {
+    const taken = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'users_legacy%'")
+      .all().map((r) => r.name);
+    if (taken.includes(legacy)) {
+      let i = 2;
+      while (taken.includes(`${legacy}_${i}`)) i += 1;
+      legacy = `${legacy}_${i}`;
+    }
+  } catch (_) { /* fall back to the plain name */ }
+
+  console.warn(`[db] users table is missing required column(s): ${missing.join(', ')} — renaming it to ${legacy} and rebuilding with the current schema`);
+  const shared = USERS_REQUIRED_COLUMNS.filter((c) => existing.includes(c));
+  const work = () => {
+    db.exec(`ALTER TABLE users RENAME TO ${legacy}`);
+    db.exec(USERS_CREATE_SQL);
+    if (shared.includes('email') && shared.includes('password_hash')) {
+      // Copy the columns that exist in both schemas. `name` is NOT NULL
+      // with no default, so when the old table lacks it, fill '' so
+      // salvageable rows still satisfy the new constraints; role and
+      // created_at fall back to their defaults when absent.
+      const insertCols = [...shared];
+      const selectExprs = shared.map((c) => `"${c}"`);
+      if (!insertCols.includes('name')) { insertCols.push('name'); selectExprs.push("''"); }
+      try {
+        const info = db.prepare(
+          `INSERT INTO users (${insertCols.join(',')}) SELECT ${selectExprs.join(',')} FROM ${legacy}`
+        ).run();
+        console.warn(`[db] users repair: copied ${info.changes} row(s) from ${legacy} into the rebuilt users table`);
+      } catch (e) {
+        // e.g. duplicate/NULL emails in the legacy data — retry row by row
+        // so every salvageable account survives; the rest stays in legacy.
+        const rows = db.prepare(`SELECT ${shared.map((c) => `"${c}"`).join(',')} FROM ${legacy}`).all();
+        const ins = db.prepare(
+          `INSERT OR IGNORE INTO users (${insertCols.join(',')}) VALUES (${insertCols.map(() => '?').join(',')})`
+        );
+        let copied = 0;
+        for (const row of rows) {
+          copied += ins.run(...insertCols.map((c) => (shared.includes(c) ? row[c] : ''))).changes;
+        }
+        console.warn(`[db] users repair: bulk copy failed (${e.message}); salvaged ${copied} of ${rows.length} row(s) row-by-row — the rest remain in ${legacy}`);
+      }
+    } else {
+      console.warn(`[db] users repair: legacy table ${legacy} has no email/password_hash columns to salvage — its rows were left untouched in ${legacy}`);
+    }
+  };
+  try {
+    if (typeof db.transaction === 'function') db.transaction(work)(); else work();
+  } catch (e) {
+    console.warn('[db] users repair failed (old table left as-is):', e.message);
+  }
+}
+
+repairUsersTable();
+
 // Migration for databases created before receipt photos existed: add the
 // receipt_image column (a data URL stored with the record) wherever missing.
 for (const table of ['events', 'expenses', 'income', 'payroll']) {
