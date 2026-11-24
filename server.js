@@ -16,6 +16,7 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 const {
   db, REGISTERS, pickColumns, insertRegisterRow, listRegisterRows,
+  insertBankAccount, listBankAccounts,
   classifyEvent, analyticsSummary, audit, toIntAmount, validateReceiptImage,
   resetAllData,
 } = require('./src/db');
@@ -196,6 +197,19 @@ app.post('/api/products', requireAuth, requireRole(...WRITE_ROLES), (req, res) =
   const info = db.prepare('INSERT INTO products (name, code, unit, sale_price_rial, notes) VALUES (?,?,?,?,?)')
     .run(b.name, b.code || '', b.unit || '', price, b.notes || '');
   return res.status(201).json(db.prepare('SELECT * FROM products WHERE id = ?').get(info.lastInsertRowid));
+});
+
+// ---------- Bank accounts ----------
+// balance_rial is the opening balance recorded at creation (a snapshot the
+// finance team maintains, not a live bank feed). Reads: any logged-in user.
+// Writes: admin | finance only.
+app.get('/api/bank-accounts', requireAuth, (req, res) => {
+  res.json(listBankAccounts());
+});
+app.post('/api/bank-accounts', requireAuth, requireRole(...WRITE_ROLES), (req, res) => {
+  const { row, error } = insertBankAccount(req.body || {});
+  if (error) return res.status(400).json({ error });
+  return res.status(201).json(row);
 });
 
 // ---------- Knowledge ----------
@@ -409,8 +423,30 @@ agent.patch('/tasks/:id', (req, res) => {
   return res.json(db.prepare('SELECT * FROM tasks WHERE id = ?').get(Number(req.params.id)));
 });
 
+agent.get('/bank-accounts', (req, res) => {
+  res.json(listBankAccounts());
+});
+
+agent.post('/bank-accounts', (req, res) => {
+  const { row, error } = insertBankAccount(req.body || {});
+  if (error) return res.status(400).json({ error });
+  audit('pip-agent', 'create', 'bank_accounts', row.id);
+  return res.status(201).json(row);
+});
+
 agent.get('/questions', (req, res) => {
   res.json(db.prepare('SELECT * FROM questions ORDER BY id ASC LIMIT 500').all());
+});
+
+agent.post('/questions/:id/answer', (req, res) => {
+  const answer = String((req.body || {}).answer || '').trim();
+  if (!answer) return res.status(400).json({ error: 'متن پاسخ لازم است' });
+  const info = db.prepare(
+    "UPDATE questions SET answer = ?, status = 'پاسخ داده شد', answered_at = datetime('now') WHERE id = ?"
+  ).run(answer, Number(req.params.id));
+  if (!info.changes) return res.status(404).json({ error: 'پرسش پیدا نشد' });
+  audit('pip-agent', 'answer', 'questions', Number(req.params.id));
+  return res.json(db.prepare('SELECT * FROM questions WHERE id = ?').get(Number(req.params.id)));
 });
 
 agent.get('/analytics/summary', (req, res) => {

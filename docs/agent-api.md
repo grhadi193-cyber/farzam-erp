@@ -29,14 +29,25 @@ Every agent **write** inserts a row into `audit_log` with actor `pip-agent`, the
 | GET | `/api/agent/tasks` | List staff tasks |
 | POST | `/api/agent/tasks` | Create a task (audited). Body: `{ "title", "assignee", "deadline", "details", "status" }`; `title` is required, `status` must be one of در انتظار انجام / در حال انجام / انجام شد / نیازمند بررسی |
 | PATCH | `/api/agent/tasks/:id` | Update a task's `status` / `report` (or title/assignee/deadline/details), audited |
+| GET | `/api/agent/bank-accounts` | List bank accounts (name, bank, branch, IBAN, account number, opening balance) |
+| POST | `/api/agent/bank-accounts` | Create a bank account (audited). Body: `{ "name", "bank", "branch", "iban", "account_no", "balance_rial", "notes" }`; `name` is required, `balance_rial` is the integer Rial opening balance at creation, returns 201 with the row |
 | GET | `/api/agent/questions` | List the management questions (group, question, answer, status) |
-| GET | `/api/agent/analytics/summary` | Totals per register (Rial), net, counts (incl. customers without national ID, open/total questions), unclear count, expenses by category, open ledgers |
+| POST | `/api/agent/questions/:id/answer` | Record management's answer (audited). Body: `{ "answer": "..." }`; sets the answer and marks the question «پاسخ داده شد», returns the updated row; 404 for an unknown id, 400 for an empty answer |
+| GET | `/api/agent/analytics/summary` | Totals per register (Rial), net, counts (incl. customers without national ID, open/total questions), unclear count, expenses by category, open ledgers, and `cash` (bank-account count and the sum of their opening balances) |
 | GET | `/api/agent/audit` | Latest audit-log rows |
 
 ## Register row fields
 
 Common: `date_shamsi`, `time_ir`, `person`, `telegram_ref`, `description`, `amount_rial` (integer, Rial), `payment_method`, `tracking_no`, `receipt_date_time`, `receipt_status` (دارد/ندارد), `review_status`, `record_folder`, `notes`, `receipt_image`.
 Expenses add `category`; income adds `account_dest`; payroll adds `basis`.
+
+## Ledger item fields
+
+`kind` (required, one of `receivable` = دریافتنی, `payable` = پرداختنی, `cheque` = چک), `party`, `description`, `amount_rial` (integer, Rial), `due_date_shamsi`, `status` (defaults to «باز»), `cheque_sayad_no` (Sayad number, for cheques).
+
+## Bank account fields
+
+`name` (required), `bank`, `branch`, `iban`, `account_no`, `balance_rial` (integer, Rial — the opening balance recorded when the account is created; it is a maintained snapshot, not a live bank feed), `notes`.
 
 `receipt_image` is the receipt photo stored with the record as a data URL. When present it must be a string starting with `data:image/` and at most 2,000,000 characters, otherwise the write is rejected with HTTP 400. A row created with a `receipt_image` defaults `receipt_status` to دارد when the caller does not set it. Intake events carry the same field (top level or inside `payload`); classifying such an event copies the image into the created register row, and the event keeps its own copy.
 
