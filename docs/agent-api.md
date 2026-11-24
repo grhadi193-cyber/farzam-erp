@@ -26,7 +26,11 @@ Every agent **write** inserts a row into `audit_log` with actor `pip-agent`, the
 | POST | `/api/agent/customers` | Create a customer (audited). Body: `{ "name", "code", "national_id", "phone", "notes" }`; `name` is required, returns 201 with the row |
 | GET | `/api/agent/products` | List products (master data) |
 | POST | `/api/agent/products` | Create a product (audited). Body: `{ "name", "code", "unit", "sale_price_rial", "notes" }`; `name` is required, `sale_price_rial` is integer Rial, returns 201 with the row |
-| GET | `/api/agent/analytics/summary` | Totals per register (Rial), net, counts, unclear count, expenses by category, open ledgers |
+| GET | `/api/agent/tasks` | List staff tasks |
+| POST | `/api/agent/tasks` | Create a task (audited). Body: `{ "title", "assignee", "deadline", "details", "status" }`; `title` is required, `status` must be one of در انتظار انجام / در حال انجام / انجام شد / نیازمند بررسی |
+| PATCH | `/api/agent/tasks/:id` | Update a task's `status` / `report` (or title/assignee/deadline/details), audited |
+| GET | `/api/agent/questions` | List the management questions (group, question, answer, status) |
+| GET | `/api/agent/analytics/summary` | Totals per register (Rial), net, counts (incl. customers without national ID, open/total questions), unclear count, expenses by category, open ledgers |
 | GET | `/api/agent/audit` | Latest audit-log rows |
 
 ## Register row fields

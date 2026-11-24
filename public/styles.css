@@ -67,6 +67,11 @@ label input, label select, label textarea { margin-top: 4px; color: var(--text);
   border-radius: 12px; padding: 8px 16px; line-height: 1.4; white-space: nowrap;
   box-shadow: 0 4px 12px rgba(16, 35, 51, .22), inset 0 0 0 1px rgba(201, 162, 39, .35);
 }
+.brand-logo-img {
+  height: 46px; width: auto; display: block;
+  background: #fff; border: 1px solid var(--border); border-radius: 12px;
+  padding: 5px 10px; box-shadow: var(--shadow);
+}
 .brand-block { display: flex; align-items: center; gap: 12px; }
 .brand-title { font-size: 17px; font-weight: bold; color: var(--navy); line-height: 1.4; }
 .brand-sub { font-size: 12px; }
@@ -134,6 +139,8 @@ main { padding: 14px 20px 18px; max-width: 1240px; margin: 0 auto; }
   padding: 16px; box-shadow: var(--shadow);
 }
 .card .num { font-size: 22px; font-weight: bold; color: var(--navy); }
+.card .num.neg { color: var(--neg); }
+.card .num.pos { color: var(--accent); }
 .card .lbl { color: var(--muted); font-size: 13px; }
 .card.alert .num { color: var(--warn); }
 .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 18px; }
@@ -191,6 +198,16 @@ tr:last-child td { border-bottom: none; }
 .kitem h3 { margin: 0 0 4px; font-size: 15px; color: var(--navy); }
 .empty { color: var(--muted); text-align: center; padding: 22px; background: var(--card); border: 1px dashed var(--border); border-radius: 16px; }
 svg text { font-family: inherit; }
+
+/* Monitoring per-person bars */
+.pbar-track { background: #f1e8d2; border-radius: 999px; height: 9px; min-width: 90px; overflow: hidden; }
+.pbar { background: linear-gradient(90deg, var(--navy), var(--navy2)); height: 100%; border-radius: 999px; }
+
+/* Task reports & management answers */
+.answer-box {
+  background: #f0f6f1; border: 1px solid #d7e7da; border-radius: 10px;
+  padding: 8px 11px; margin-top: 8px; line-height: 1.9;
+}
 
 /* Receipt photos */
 input[type="file"] { padding: 6px 9px; background: #fffdf7; cursor: pointer; }

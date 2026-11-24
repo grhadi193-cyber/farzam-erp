@@ -12,7 +12,7 @@
 <div id="login-view" class="login-wrap">
   <form id="login-form" class="login-card">
     <div class="login-brand">
-      <div class="brand-logo">فرزام</div>
+      <img src="/typography.svg" alt="فرزام" class="brand-logo-img">
       <div>
         <h1>پنل یکپارچه مدیریت شرکت</h1>
         <p class="muted">سامانه مالی فرزام — ورود کاربران</p>
@@ -33,10 +33,10 @@
 <div id="app-view" class="hidden">
   <header class="topbar">
     <div class="brand-block">
-      <div class="brand-logo">فرزام</div>
+      <img src="/typography.svg" alt="فرزام" class="brand-logo-img">
       <div>
         <div class="brand-title">پنل یکپارچه مدیریت شرکت</div>
-        <div class="brand-sub muted">آخرین به‌روزرسانی: <span id="last-update">—</span></div>
+        <div class="brand-sub muted" id="data-status">آخرین به‌روزرسانی: —</div>
       </div>
     </div>
     <div class="top-controls">
@@ -55,24 +55,30 @@
   <nav class="tabs" id="tabs">
     <button data-tab="dashboard" class="tab active">داشبورد</button>
     <button data-tab="intake" class="tab">ورودی یکپارچه<span class="tab-badge" id="badge-intake"></span></button>
+    <button data-tab="monitoring" class="tab">مانیتورینگ و تحلیل</button>
     <button data-tab="expenses" class="tab">هزینه‌ها<span class="tab-badge" id="badge-expenses"></span></button>
-    <button data-tab="income" class="tab">درآمدها</button>
-    <button data-tab="payroll" class="tab">حقوق و دستمزد</button>
+    <button data-tab="customers" class="tab">مشتریان<span class="tab-badge" id="badge-customers"></span></button>
     <button data-tab="ledgers" class="tab">دفاتر و چک‌ها</button>
-    <button data-tab="customers" class="tab">مشتری‌ها<span class="tab-badge" id="badge-customers"></span></button>
+    <button data-tab="payroll" class="tab">حقوق و دستمزد</button>
+    <button data-tab="income" class="tab">درآمدها</button>
     <button data-tab="products" class="tab">کالاها</button>
+    <button data-tab="tasks" class="tab">وظایف<span class="tab-badge" id="badge-tasks"></span></button>
+    <button data-tab="questions" class="tab">پرسش‌های مدیریت<span class="tab-badge" id="badge-questions"></span></button>
     <button data-tab="knowledge" class="tab">دانش و قوانین</button>
   </nav>
 
   <main>
     <section id="tab-dashboard" class="panel"></section>
     <section id="tab-intake" class="panel hidden"></section>
+    <section id="tab-monitoring" class="panel hidden"></section>
     <section id="tab-expenses" class="panel hidden"></section>
-    <section id="tab-income" class="panel hidden"></section>
-    <section id="tab-payroll" class="panel hidden"></section>
-    <section id="tab-ledgers" class="panel hidden"></section>
     <section id="tab-customers" class="panel hidden"></section>
+    <section id="tab-ledgers" class="panel hidden"></section>
+    <section id="tab-payroll" class="panel hidden"></section>
+    <section id="tab-income" class="panel hidden"></section>
     <section id="tab-products" class="panel hidden"></section>
+    <section id="tab-tasks" class="panel hidden"></section>
+    <section id="tab-questions" class="panel hidden"></section>
     <section id="tab-knowledge" class="panel hidden"></section>
   </main>
 

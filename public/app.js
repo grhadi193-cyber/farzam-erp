@@ -160,8 +160,27 @@ function renderBadges(s) {
   set('badge-expenses', s.counts.expenses);
   set('badge-customers', s.counts.customers);
   set('badge-intake', s.events.unprocessed);
-  const lu = document.getElementById('last-update');
-  if (lu) lu.textContent = new Date().toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' });
+  set('badge-questions', s.counts.questions_open);
+  // Header subtitle reports DATA STATUS (like the panel), not a clock:
+  // what was read, and which modules are honestly empty.
+  const ds = document.getElementById('data-status');
+  if (ds) {
+    const c = s.counts;
+    const read = [];
+    if (c.expenses) read.push(`${faNum(c.expenses)} هزینه`);
+    if (c.income) read.push(`${faNum(c.income)} درآمد`);
+    if (c.payroll) read.push(`${faNum(c.payroll)} حقوق`);
+    if (c.customers) read.push(`${faNum(c.customers)} مشتری`);
+    if (c.products) read.push(`${faNum(c.products)} کالا`);
+    const joinFa = (arr) => (arr.length > 1 ? `${arr.slice(0, -1).join('، ')} و ${arr[arr.length - 1]}` : (arr[0] || ''));
+    let txt = `آخرین به‌روزرسانی: ${read.length ? `${joinFa(read)} خوانده شد` : 'هنوز داده‌ای خوانده نشده است'}`;
+    const empty = [];
+    if (!c.income) empty.push('درآمد');
+    if (!c.payroll) empty.push('حقوق');
+    if (!c.ledger_items) empty.push('دفاتر');
+    if (empty.length) txt += `؛ ${joinFa(empty)} خالی بودند`;
+    ds.textContent = txt;
+  }
 }
 
 async function loadBadges() {
@@ -196,7 +215,7 @@ function loadTab(name) {
     dashboard: loadDashboard, intake: loadIntake, monitoring: loadMonitoring,
     expenses: () => loadRegister('expenses'), income: () => loadRegister('income'), payroll: () => loadRegister('payroll'),
     ledgers: loadLedgers, customers: loadCustomers, products: loadProducts,
-    questions: loadQuestions, knowledge: loadKnowledge,
+    tasks: loadTasks, questions: loadQuestions, knowledge: loadKnowledge,
   };
   if (loaders[name]) loaders[name]();
 }
@@ -220,11 +239,14 @@ async function loadDashboard() {
     // expenses+income+payroll whose review_status is not «تأیید شده».
     let confirmedExp = t.expenses_rial;
     let attentionCount = s.unclear_count;
+    let dupTotal = 0;
+    let noReceiptCount = 0;
     try {
       const expRows = await api('/api/registers/expenses');
-      const dupTotal = expRows.filter((r) => String(r.review_status || '').includes('تکراری'))
+      dupTotal = expRows.filter((r) => String(r.review_status || '').includes('تکراری'))
         .reduce((a, r) => a + Number(r.amount_rial || 0), 0);
       confirmedExp = t.expenses_rial - dupTotal;
+      noReceiptCount = expRows.filter((r) => r.receipt_status === 'ندارد').length;
       try {
         const incRows = await api('/api/registers/income');
         const payRows = await api('/api/registers/payroll');
@@ -238,17 +260,17 @@ async function loadDashboard() {
     el.innerHTML = `
       <div class="kpis">
         ${kpi('جمع هزینه‌های ثبت‌شده', faMoney(t.expenses_rial), `${faNum(c.expenses)} رکورد از ربات و پنل`, 'neg')}
-        ${confirmedExp !== null ? kpi('هزینه قطعی (تأییدشده)', faMoney(confirmedExp), 'فقط ردیف‌های تأییدشده از جمع بالا', 'neg') : ''}
+        ${kpi('هزینه قطعی (بدون ردیف تکراری)', faMoney(confirmedExp), dupTotal ? `ردیف تکراری در انتظار تصمیم: ${faMoney(dupTotal)}` : 'ردیف تکراری در انتظار تصمیم نیست', 'neg')}
         ${kpi('جمع درآمدهای ثبت‌شده', faMoney(t.income_rial), c.income ? `${faNum(c.income)} رکورد` : 'هنوز رکوردی ثبت نشده', 'pos')}
-        ${kpi('تراز ثبت‌شده (درآمد − هزینه − حقوق)', faMoney(netRial), 'مانده حساب‌ها نیست؛ فقط جمع همین ثبت‌هاست', netRial < 0 ? 'neg' : 'pos')}
+        ${kpi('تراز ثبت‌شده (درآمد − هزینه قطعی)', faMoney(netRial), 'مانده حساب‌ها نیست؛ فقط جمع همین ثبت‌هاست', netRial < 0 ? 'neg' : 'pos')}
         ${kpi('جمع حقوق و دستمزد', faMoney(t.payroll_rial), c.payroll ? `${faNum(c.payroll)} رکورد` : 'هنوز رکوردی ثبت نشده')}
-        ${kpi('جمع کل خروجی (هزینه + حقوق)', faMoney(confirmedExp + t.payroll_rial), 'کل پول خارج‌شده ثبت‌شده از شرکت', 'neg')}
+        ${kpi('جمع کل خروجی (هزینه قطعی + حقوق)', faMoney(confirmedExp + t.payroll_rial), 'کل پول خارج‌شده ثبت‌شده از شرکت', 'neg')}
         ${kpi('دریافتنی‌های باز', faMoney(rec.total), rec.count ? `${faNum(rec.count)} مورد باز` : 'طلب بازی ثبت نشده', 'pos')}
         ${kpi('پرداختنی‌های باز', faMoney(pay.total), pay.count ? `${faNum(pay.count)} مورد باز` : 'بدهی بازی ثبت نشده')}
         ${kpi('چک‌های در جریان', faNum(chq.count), `مجموع مبلغ: ${faMoney(chq.total)}`)}
-        ${kpi('موارد نیازمند پیگیری', faNum(attentionCount), `پردازش‌نشده: ${faNum(s.events.unprocessed)} — نیازمند بررسی: ${faNum(s.events.needs_review)}`, attentionCount ? 'warn-num' : '')}
-        ${kpi('مشتریان', faNum(c.customers), 'مشتری ثبت‌شده در داده‌های پایه')}
-        ${kpi('کالاها', faNum(c.products), 'کالای ثبت‌شده در داده‌های پایه')}
+        ${kpi('موارد نیازمند پیگیری', faNum(attentionCount), noReceiptCount ? `${faNum(noReceiptCount)} رکورد هزینه بدون رسید` : 'همه رکوردهای هزینه رسید دارند', attentionCount ? 'warn-num' : '')}
+        ${kpi('مشتریان', faNum(c.customers), `${faNum(c.customers_without_id || 0)} نفر بدون شناسه ملی`)}
+        ${kpi('پرسش‌های باز مدیریت', faNum(c.questions_open || 0), `از ${faNum(c.questions_total || 0)} پرسش رسمی بخش مالی`, c.questions_open ? 'warn-num' : '')}
       </div>
       <div class="intake-banner">
         <div class="banner-head">
@@ -324,30 +346,66 @@ async function loadMonitoring() {
   try {
     const s = await api('/api/analytics/summary');
     const t = s.totals;
+    const c = s.counts;
     const rows = await api('/api/registers/expenses').catch(() => []);
-    const kn = await api('/api/knowledge').catch(() => []);
-    // Per-person expense totals, from the register itself.
+    const questions = await api('/api/questions').catch(() => []);
+    // Panel definitions, same as the dashboard.
+    const dupRows = rows.filter((r) => String(r.review_status || '').includes('تکراری'));
+    const dupTotal = dupRows.reduce((a, r) => a + Number(r.amount_rial || 0), 0);
+    const confirmedExp = t.expenses_rial - dupTotal;
+    const netRial = t.income_rial - confirmedExp - t.payroll_rial;
+    const attentionCount = rows.filter((r) => r.review_status !== 'تأیید شده').length;
+    // Per-person expense totals + counts, from the register itself.
     const byPerson = {};
     rows.forEach((r) => {
       const p = r.person || 'نامشخص';
-      byPerson[p] = (byPerson[p] || 0) + Number(r.amount_rial || 0);
+      if (!byPerson[p]) byPerson[p] = { total: 0, count: 0 };
+      byPerson[p].total += Number(r.amount_rial || 0);
+      byPerson[p].count += 1;
     });
-    const personRows = Object.entries(byPerson).sort((a, b) => b[1] - a[1]);
+    const personRows = Object.entries(byPerson).sort((a, b) => b[1].total - a[1].total);
+    const personMax = personRows.length ? personRows[0][1].total : 0;
     // Automatic alerts: real gaps in the data, not guesses.
     const alerts = [];
     const noReceipt = rows.filter((r) => r.receipt_status === 'ندارد' && Number(r.amount_rial || 0) > 0);
     if (noReceipt.length) alerts.push(`${faNum(noReceipt.length)} هزینه بدون رسید ثبت شده است — جمع ${faMoney(noReceipt.reduce((a, r) => a + Number(r.amount_rial || 0), 0))}`);
-    const dup = rows.filter((r) => (r.review_status || '').includes('تکراری'));
-    if (dup.length) alerts.push(`ردیف تکراری باطری هنوز در انتظار تصمیم شماست — ${faMoney(dup.reduce((a, r) => a + Number(r.amount_rial || 0), 0))} در جمع هزینه‌ها هست`);
+    if (dupRows.length) alerts.push(`${faNum(dupRows.length)} ردیف تکراری هنوز در انتظار تصمیم شماست — ${faMoney(dupTotal)} در جمع هزینه‌ها هست و از هزینه قطعی کم شده است`);
     const incomplete = rows.filter((r) => ['نیازمند تکمیل', 'ناقص'].includes(r.review_status));
     if (incomplete.length) alerts.push(`${faNum(incomplete.length)} رکورد نیازمند تکمیل است (مبلغ یا شرح ناقص)`);
     if (s.events.unprocessed) alerts.push(`${faNum(s.events.unprocessed)} رویداد پردازش‌نشده در ورودی یکپارچه منتظر طبقه‌بندی است`);
-    if (s.unclear_count) alerts.push(`${faNum(s.unclear_count)} مورد نیازمند بررسی در صف تصمیم است`);
-    const openQ = kn.filter((r) => r.title.startsWith('پرسش مدیریت') && !r.body.includes('پاسخ مدیریت')).length;
+    if (s.events.needs_review) alerts.push(`${faNum(s.events.needs_review)} رویداد در صف «نیازمند بررسی» منتظر تصمیم است`);
+    const openQ = questions.filter((q) => q.status !== 'پاسخ داده شد').length;
     if (openQ) alerts.push(`${faNum(openQ)} پرسش مدیریت هنوز بی‌پاسخ است — پاسخ‌ها موجودی افتتاحیه و پیش‌بینی نقدینگی را روشن می‌کنند`);
-    if (!t.income_rial) alerts.push('هنوز درآمدی ثبت نشده است؛ تراز فقط هزینه‌ها را نشان می‌دهد، نه مانده حساب‌ها را');
+    if (!t.income_rial) alerts.push('هنوز درآمدی ثبت نشده است؛ تراز فقط خروجی‌ها را نشان می‌دهد، نه مانده حساب‌ها را');
     const quality = rows.length ? Math.round(100 * rows.filter((r) => r.receipt_status === 'دارد' || Number(r.amount_rial || 0) === 0).length / rows.length) : 100;
+    // Rule-based analysis: every figure below is computed from the rows above.
+    const analysis = [];
+    if (rows.length) {
+      analysis.push(`تا امروز ${faNum(rows.length)} رکورد هزینه با جمع ${faMoney(t.expenses_rial)} ثبت شده است${dupTotal ? ` که ${faMoney(dupTotal)} آن ردیف تکراریِ در انتظار تصمیم است؛ هزینه قطعی ${faMoney(confirmedExp)} است` : ''}.`);
+      const cats = (s.expenses_by_category || []).filter((x) => Number(x.total || 0) > 0);
+      if (cats.length && t.expenses_rial) {
+        const top = cats[0];
+        analysis.push(`بزرگ‌ترین دسته «${top.category}» است با ${faMoney(top.total)}، یعنی ${faNum(Math.round(100 * Number(top.total) / t.expenses_rial))}٪ از کل هزینه‌ها.`);
+      }
+      if (personRows.length && t.expenses_rial) {
+        const [pName, pVal] = personRows[0];
+        analysis.push(`بیشترین ثبت هزینه به نام «${pName}» است: ${faMoney(pVal.total)} در ${faNum(pVal.count)} رکورد (${faNum(Math.round(100 * pVal.total / t.expenses_rial))}٪ از کل).`);
+      }
+      analysis.push(`پوشش رسید ${faNum(quality)}٪ است${noReceipt.length ? ` و ${faNum(noReceipt.length)} رکوردِ دارای مبلغ هنوز رسید ندارند` : ''}.`);
+    } else {
+      analysis.push('هنوز رکورد هزینه‌ای ثبت نشده است؛ به‌محض ثبت اولین رکوردها، تحلیل اینجا از روی همان اعداد واقعی ساخته می‌شود.');
+    }
+    if (!t.income_rial && !t.payroll_rial) analysis.push('درآمد و حقوقی هنوز ثبت نشده است؛ پس تراز فعلی فقط سمت خروجی شرکت را نشان می‌دهد و مانده حساب‌ها نیست.');
+    if (openQ) analysis.push(`${faNum(openQ)} پرسش از ${faNum(questions.length)} پرسش رسمی بخش مالی هنوز بی‌پاسخ است؛ تا پاسخ‌ها نرسد، مانده‌های افتتاحیه و پیش‌بینی نقدینگی قابل ساخت نیست.`);
+    const strip = (lbl, val, cls = '') => `<div class="card"><div class="lbl">${lbl}</div><div class="num ${cls}">${val}</div></div>`;
     el.innerHTML = `
+      <div class="cards">
+        ${strip('جمع هزینه‌های ثبت‌شده', faMoney(t.expenses_rial), 'neg')}
+        ${strip('هزینه قطعی (بدون ردیف تکراری)', faMoney(confirmedExp), 'neg')}
+        ${strip('جمع درآمدهای ثبت‌شده', faMoney(t.income_rial), 'pos')}
+        ${strip('جمع حقوق و دستمزد', faMoney(t.payroll_rial))}
+        ${strip('تراز ثبت‌شده', faMoney(netRial), netRial < 0 ? 'neg' : 'pos')}
+      </div>
       <div class="grid2">
         <div class="card"><h2 class="sec">مقایسه جریان مالی (${unitName()})</h2>${barChart([
           { label: 'درآمد', value: t.income_rial, color: '#2f8f5b' },
@@ -358,17 +416,22 @@ async function loadMonitoring() {
       </div>
       <div class="grid2" style="margin-top:12px">
         <div class="card"><h2 class="sec">هزینه به تفکیک شخص</h2>
-          ${personRows.length ? `<table><tr><th>شخص</th><th>جمع (${unitName()})</th></tr>${personRows.map(([p, v]) => `<tr><td>${esc(p)}</td><td>${faMoney(v)}</td></tr>`).join('')}</table>` : '<div class="empty">هنوز هزینه‌ای ثبت نشده است</div>'}
+          ${personRows.length ? `<table><tr><th>شخص</th><th>سهم از کل</th><th>تعداد</th><th>جمع (${unitName()})</th></tr>${personRows.map(([p, v]) => `<tr><td>${esc(p)}</td><td><div class="pbar-track"><div class="pbar" style="width:${personMax ? Math.max(4, Math.round(100 * v.total / personMax)) : 0}%"></div></div></td><td>${faNum(v.count)}</td><td>${faMoney(v.total)}</td></tr>`).join('')}</table>` : '<div class="empty">هنوز هزینه‌ای ثبت نشده است</div>'}
         </div>
         <div class="card"><h2 class="sec">شاخص‌های کیفیت داده</h2>
           <div class="kpi-lbl">پوشش رسید</div><div class="kpi-num">${faNum(quality)}٪</div>
           <div class="kpi-cap">سهم رکوردهای هزینه با رسید (یا مبلغ صفر) از کل رکوردها</div>
-          <div class="kpi-lbl" style="margin-top:10px">موارد نیازمند پیگیری</div><div class="kpi-num ${s.unclear_count ? 'warn-num' : ''}">${faNum(s.unclear_count)}</div>
-          <div class="kpi-cap">پردازش‌نشده: ${faNum(s.events.unprocessed)} — نیازمند بررسی: ${faNum(s.events.needs_review)}</div>
+          <div class="kpi-lbl" style="margin-top:10px">موارد نیازمند پیگیری</div><div class="kpi-num ${attentionCount ? 'warn-num' : ''}">${faNum(attentionCount)}</div>
+          <div class="kpi-cap">رکوردهای هزینه که هنوز «تأیید شده» نیستند — پردازش‌نشده: ${faNum(s.events.unprocessed)}، نیازمند بررسی: ${faNum(s.events.needs_review)}</div>
+          <div class="kpi-lbl" style="margin-top:10px">مشتریان بدون شناسه ملی</div><div class="kpi-num">${faNum(c.customers_without_id || 0)}</div>
+          <div class="kpi-cap">از ${faNum(c.customers)} مشتری ثبت‌شده در داده‌های پایه</div>
         </div>
       </div>
       <div class="card" style="margin-top:12px"><h2 class="sec">هشدارهای خودکار</h2>
         ${alerts.length ? `<ul style="margin:0;padding-inline-start:18px">${alerts.map((a) => `<li>${esc(a)}</li>`).join('')}</ul>` : '<div class="empty">هشداری نیست — داده‌ها کامل‌اند</div>'}
+      </div>
+      <div class="card" style="margin-top:12px"><h2 class="sec">تحلیل</h2>
+        <p style="margin:0;line-height:2">${analysis.map(esc).join(' ')}</p>
       </div>`;
   } catch (err) {
     el.innerHTML = `<div class="error">${esc(err.message)}</div>`;
@@ -646,40 +709,92 @@ async function loadKnowledge() {
   });
 }
 
+// ---------- Tasks ----------
+const TASK_STATUSES = ['در انتظار انجام', 'در حال انجام', 'انجام شد', 'نیازمند بررسی'];
+const taskStatusCls = (s) => (s === 'انجام شد' ? 'ok' : s === 'در حال انجام' ? 'navy' : s === 'نیازمند بررسی' ? 'bad' : 'warn');
+
+async function loadTasks() {
+  const el = $('#tab-tasks');
+  let rows = [];
+  try { rows = await api('/api/tasks'); } catch (err) { el.innerHTML = `<div class="error">${esc(err.message)}</div>`; return; }
+  const badge = document.getElementById('badge-tasks');
+  if (badge) badge.textContent = rows.filter((r) => r.status !== 'انجام شد').length ? faNum(rows.filter((r) => r.status !== 'انجام شد').length) : '';
+  el.innerHTML = `
+    ${canWrite() ? `<form class="form-card" id="task-form"><h2 class="sec">تعریف وظیفه جدید</h2>
+      <div class="form-grid">
+        <label style="grid-column: span 2">عنوان وظیفه<input name="title" required placeholder="مثلاً: پیگیری وصول فاکتور ۱۲۳"></label>
+        <label>مسئول انجام<input name="assignee" placeholder="نام کارمند"></label>
+        <label>مهلت (شمسی)<input name="deadline" placeholder="۱۴۰۵/۰۹/۱۰"></label>
+        <label style="grid-column: span 2">جزئیات<textarea name="details" rows="2"></textarea></label>
+      </div><button class="btn primary" type="submit">تعریف وظیفه</button></form>` : ''}
+    ${rows.length ? rows.map((r) => `<div class="kitem">
+      <h3>${esc(r.title)} <span class="badge ${taskStatusCls(r.status)}">${esc(r.status)}</span></h3>
+      <div class="muted">مسئول: ${esc(r.assignee || '—')} · مهلت: ${esc(r.deadline || '—')} · تعریف‌کننده: ${esc(r.created_by || '—')}</div>
+      ${r.details ? `<div>${esc(r.details)}</div>` : ''}
+      ${r.report ? `<div class="answer-box"><b>گزارش کارمند:</b> ${esc(r.report)}</div>` : ''}
+      <div class="classify-row">
+        <label>وضعیت<select class="tk-status" data-id="${r.id}">${TASK_STATUSES.map((s) => `<option ${s === r.status ? 'selected' : ''}>${s}</option>`).join('')}</select></label>
+        <label>گزارش انجام کار<input class="tk-report" data-id="${r.id}" value="${esc(r.report || '')}" placeholder="گزارش پیشرفت یا نتیجه…"></label>
+        <button class="btn primary tk-save" data-id="${r.id}">ثبت گزارش / وضعیت</button>
+      </div>
+    </div>`).join('') : '<div class="empty">هنوز وظیفه‌ای تعریف نشده است</div>'}`;
+  const form = $('#task-form', el);
+  if (form) form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const body = {};
+    new FormData(form).forEach((v, k) => { if (v !== '') body[k] = v; });
+    try { await api('/api/tasks', { method: 'POST', body }); loadTasks(); }
+    catch (err) { alert(err.message); }
+  });
+  $$('.tk-save', el).forEach((btn) => btn.addEventListener('click', async () => {
+    const id = btn.dataset.id;
+    const status = $(`.tk-status[data-id="${id}"]`, el).value;
+    const report = $(`.tk-report[data-id="${id}"]`, el).value;
+    try { await api(`/api/tasks/${id}`, { method: 'PATCH', body: { status, report } }); loadTasks(); }
+    catch (err) { alert(err.message); }
+  }));
+}
+
 // ---------- Management questions ----------
-// Questions live in knowledge_entries as kind 'note' with the
-// 'پرسش مدیریت' title prefix (the kind CHECK only allows rule/answer/note,
-// so no schema change was needed on the live database).
-const Q_PREFIX = 'پرسش مدیریت';
+// Questions live in their own `questions` table (migrated out of the
+// knowledge base at boot). Grouped display, one answer form per question.
 async function loadQuestions() {
   const el = $('#tab-questions');
   el.innerHTML = '<p class="muted">در حال بارگذاری…</p>';
   try {
-    const rows = (await api('/api/knowledge')).filter((r) => r.title.startsWith(Q_PREFIX));
+    const rows = await api('/api/questions');
+    const open = rows.filter((r) => r.status !== 'پاسخ داده شد').length;
     const badge = document.getElementById('badge-questions');
-    const open = rows.filter((r) => !r.body.includes('پاسخ مدیریت')).length;
     if (badge) badge.textContent = open ? faNum(open) : '';
+    const groups = [];
+    const byGroup = {};
+    rows.forEach((r) => {
+      const g = r.group_name || 'بدون گروه';
+      if (!byGroup[g]) { byGroup[g] = []; groups.push(g); }
+      byGroup[g].push(r);
+    });
     el.innerHTML = `
-      <div class="card" style="margin-bottom:12px"><span class="lbl">پرسش‌های مدیریت: </span><b>${faNum(rows.length)} پرسش</b> — ${faNum(open)} بی‌پاسخ، ${faNum(rows.length - open)} پاسخ‌داده‌شده. پاسخ هر پرسش، حتی تقریبی، کار را جلو می‌برد.</div>
-      ${canWrite() ? `<form class="form-card" id="q-form"><h2 class="sec">پرسش جدید از مدیریت</h2>
-        <div class="form-grid">
-          <label style="grid-column: span 2">متن پرسش<input name="title" required placeholder="پرسش مدیریت: …"></label>
-          <label style="grid-column: span 2">گروه<input name="body" placeholder="گروه: …"></label>
-        </div><button class="btn primary" type="submit">ثبت پرسش</button></form>` : ''}
-      ${rows.length ? rows.map((r) => {
-        const answered = r.body.includes('پاسخ مدیریت');
-        return `<div class="kitem"><h3>${esc(r.title)} <span class="badge ${answered ? 'ok' : 'warn'}">${answered ? 'پاسخ داده شده' : 'بی‌پاسخ'}</span></h3><div>${esc(r.body || '')}</div></div>`;
-      }).join('') : '<div class="empty">هنوز پرسشی ثبت نشده است</div>'}`;
-    const form = $('#q-form', el);
-    if (form) form.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const fd = new FormData(form);
-      const title = String(fd.get('title') || '').trim();
+      <div class="card" style="margin-bottom:12px"><span class="lbl">پرسش‌های مدیریت: </span><b>${faNum(rows.length)} پرسش</b> — ${faNum(open)} بی‌پاسخ، ${faNum(rows.length - open)} پاسخ‌داده‌شده. پاسخ هر پرسش، حتی تقریبی، کار بخش مالی را جلو می‌برد.</div>
+      ${rows.length ? groups.map((g) => `<h2 class="sec" style="margin-top:16px">${esc(g)}</h2>${byGroup[g].map((r) => {
+        const answered = r.status === 'پاسخ داده شد';
+        return `<div class="kitem"><h3>${esc(r.question)} <span class="badge ${answered ? 'ok' : 'warn'}">${answered ? 'پاسخ داده شده' : 'بی‌پاسخ'}</span></h3>
+          ${answered && r.answer ? `<div class="answer-box"><b>پاسخ مدیریت:</b> ${esc(r.answer)}</div>` : ''}
+          ${canWrite() ? `<div class="classify-row">
+            <label>${answered ? 'ویرایش پاسخ' : 'پاسخ مدیریت'}<input class="qa-input" data-id="${r.id}" value="${answered ? esc(r.answer || '') : ''}" placeholder="پاسخ را اینجا بنویسید…"></label>
+            <button class="btn primary qa-save" data-id="${r.id}">ثبت پاسخ</button>
+          </div>` : ''}
+        </div>`;
+      }).join('')}`).join('') : '<div class="empty">هنوز پرسشی ثبت نشده است</div>'}`;
+    $$('.qa-save', el).forEach((btn) => btn.addEventListener('click', async () => {
+      const input = $(`.qa-input[data-id="${btn.dataset.id}"]`, el);
+      const answer = input.value.trim();
+      if (!answer) { alert('متن پاسخ را بنویسید'); return; }
       try {
-        await api('/api/knowledge', { method: 'POST', body: { title: title.startsWith(Q_PREFIX) ? title : `${Q_PREFIX} ${title}`, body: String(fd.get('body') || ''), kind: 'note' } });
+        await api(`/api/questions/${btn.dataset.id}/answer`, { method: 'POST', body: { answer } });
+        loadBadges();
         loadQuestions();
       } catch (err) { alert(err.message); }
-    });
+    }));
   } catch (err) {
     el.innerHTML = `<div class="error">${esc(err.message)}</div>`;
   }

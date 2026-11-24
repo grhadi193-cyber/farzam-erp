@@ -210,6 +210,55 @@ app.post('/api/knowledge', requireAuth, requireRole(...WRITE_ROLES), (req, res) 
   return res.status(201).json(db.prepare('SELECT * FROM knowledge_entries WHERE id = ?').get(info.lastInsertRowid));
 });
 
+// ---------- Tasks ----------
+// Reads: any logged-in user. Defining tasks: admin | finance. Updating a
+// task's status/report: any logged-in user (staff report on their own tasks).
+const TASK_STATUSES = ['در انتظار انجام', 'در حال انجام', 'انجام شد', 'نیازمند بررسی'];
+const TASK_EDITABLE = ['title', 'assignee', 'deadline', 'details', 'status', 'report'];
+
+app.get('/api/tasks', requireAuth, (req, res) => {
+  res.json(db.prepare('SELECT * FROM tasks ORDER BY id DESC LIMIT 500').all());
+});
+
+app.post('/api/tasks', requireAuth, requireRole(...WRITE_ROLES), (req, res) => {
+  const b = req.body || {};
+  if (!b.title) return res.status(400).json({ error: 'عنوان وظیفه لازم است' });
+  const status = TASK_STATUSES.includes(b.status) ? b.status : 'در انتظار انجام';
+  const info = db.prepare(
+    'INSERT INTO tasks (title, assignee, deadline, details, status, report, created_by) VALUES (?,?,?,?,?,?,?)'
+  ).run(String(b.title), b.assignee || '', b.deadline || '', b.details || '', status, b.report || '', req.user.name || '');
+  return res.status(201).json(db.prepare('SELECT * FROM tasks WHERE id = ?').get(info.lastInsertRowid));
+});
+
+app.patch('/api/tasks/:id', requireAuth, (req, res) => {
+  const b = req.body || {};
+  const cols = TASK_EDITABLE.filter((c) => b[c] !== undefined);
+  if (!cols.length) return res.status(400).json({ error: 'چیزی برای ویرایش نیست' });
+  if (b.status !== undefined && !TASK_STATUSES.includes(b.status)) {
+    return res.status(400).json({ error: 'وضعیت وظیفه نامعتبر است' });
+  }
+  const info = db.prepare(
+    `UPDATE tasks SET ${cols.map((c) => `${c} = ?`).join(', ')}, updated_at = datetime('now') WHERE id = ?`
+  ).run(...cols.map((c) => b[c]), Number(req.params.id));
+  if (!info.changes) return res.status(404).json({ error: 'وظیفه پیدا نشد' });
+  return res.json(db.prepare('SELECT * FROM tasks WHERE id = ?').get(Number(req.params.id)));
+});
+
+// ---------- Management questions ----------
+app.get('/api/questions', requireAuth, (req, res) => {
+  res.json(db.prepare('SELECT * FROM questions ORDER BY id ASC LIMIT 500').all());
+});
+
+app.post('/api/questions/:id/answer', requireAuth, requireRole(...WRITE_ROLES), (req, res) => {
+  const answer = String((req.body || {}).answer || '').trim();
+  if (!answer) return res.status(400).json({ error: 'متن پاسخ لازم است' });
+  const info = db.prepare(
+    "UPDATE questions SET answer = ?, status = 'پاسخ داده شد', answered_at = datetime('now') WHERE id = ?"
+  ).run(answer, Number(req.params.id));
+  if (!info.changes) return res.status(404).json({ error: 'پرسش پیدا نشد' });
+  return res.json(db.prepare('SELECT * FROM questions WHERE id = ?').get(Number(req.params.id)));
+});
+
 // ---------- Analytics (user) ----------
 app.get('/api/analytics/summary', requireAuth, (req, res) => {
   res.json(analyticsSummary());
@@ -327,6 +376,40 @@ agent.post('/products', (req, res) => {
     .run(b.name, b.code || '', b.unit || '', price, b.notes || '');
   audit('pip-agent', 'create', 'products', Number(info.lastInsertRowid));
   return res.status(201).json(db.prepare('SELECT * FROM products WHERE id = ?').get(info.lastInsertRowid));
+});
+
+agent.get('/tasks', (req, res) => {
+  res.json(db.prepare('SELECT * FROM tasks ORDER BY id DESC LIMIT 500').all());
+});
+
+agent.post('/tasks', (req, res) => {
+  const b = req.body || {};
+  if (!b.title) return res.status(400).json({ error: 'عنوان وظیفه لازم است' });
+  const status = TASK_STATUSES.includes(b.status) ? b.status : 'در انتظار انجام';
+  const info = db.prepare(
+    'INSERT INTO tasks (title, assignee, deadline, details, status, report, created_by) VALUES (?,?,?,?,?,?,?)'
+  ).run(String(b.title), b.assignee || '', b.deadline || '', b.details || '', status, b.report || '', 'pip-agent');
+  audit('pip-agent', 'create', 'tasks', Number(info.lastInsertRowid));
+  return res.status(201).json(db.prepare('SELECT * FROM tasks WHERE id = ?').get(info.lastInsertRowid));
+});
+
+agent.patch('/tasks/:id', (req, res) => {
+  const b = req.body || {};
+  const cols = TASK_EDITABLE.filter((c) => b[c] !== undefined);
+  if (!cols.length) return res.status(400).json({ error: 'چیزی برای ویرایش نیست' });
+  if (b.status !== undefined && !TASK_STATUSES.includes(b.status)) {
+    return res.status(400).json({ error: 'وضعیت وظیفه نامعتبر است' });
+  }
+  const info = db.prepare(
+    `UPDATE tasks SET ${cols.map((c) => `${c} = ?`).join(', ')}, updated_at = datetime('now') WHERE id = ?`
+  ).run(...cols.map((c) => b[c]), Number(req.params.id));
+  if (!info.changes) return res.status(404).json({ error: 'وظیفه پیدا نشد' });
+  audit('pip-agent', 'update', 'tasks', Number(req.params.id));
+  return res.json(db.prepare('SELECT * FROM tasks WHERE id = ?').get(Number(req.params.id)));
+});
+
+agent.get('/questions', (req, res) => {
+  res.json(db.prepare('SELECT * FROM questions ORDER BY id ASC LIMIT 500').all());
 });
 
 agent.get('/analytics/summary', (req, res) => {

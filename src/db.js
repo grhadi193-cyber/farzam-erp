@@ -154,6 +154,29 @@ CREATE TABLE IF NOT EXISTS knowledge_entries (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS tasks (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  title TEXT NOT NULL,
+  assignee TEXT,
+  deadline TEXT,
+  details TEXT,
+  status TEXT NOT NULL DEFAULT 'در انتظار انجام',
+  report TEXT,
+  created_by TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS questions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  group_name TEXT,
+  question TEXT NOT NULL,
+  answer TEXT,
+  status TEXT NOT NULL DEFAULT 'در انتظار پاسخ',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  answered_at TEXT
+);
+
 CREATE TABLE IF NOT EXISTS audit_log (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   actor TEXT NOT NULL,
@@ -321,8 +344,11 @@ function analyticsSummary() {
       income: inc.c,
       payroll: pay.c,
       customers: db.prepare('SELECT COUNT(*) AS c FROM customers').get().c,
+      customers_without_id: db.prepare("SELECT COUNT(*) AS c FROM customers WHERE national_id IS NULL OR TRIM(national_id) = ''").get().c,
       products: db.prepare('SELECT COUNT(*) AS c FROM products').get().c,
       ledger_items: db.prepare('SELECT COUNT(*) AS c FROM ledger_items').get().c,
+      questions_total: db.prepare('SELECT COUNT(*) AS c FROM questions').get().c,
+      questions_open: db.prepare("SELECT COUNT(*) AS c FROM questions WHERE status != 'پاسخ داده شد'").get().c,
     },
     events: counts,
     unclear_count: unclear,
@@ -378,6 +404,47 @@ function seed() {
 }
 
 seed();
+
+// ---------- Management questions migration ----------
+// The 20 official finance questions originally lived inside knowledge_entries
+// (titles «پرسش مدیریت N. …», body «گروه: …»). They now have their own module.
+// Idempotent: runs only while the questions table is empty. Seeds from
+// data/questions-seed.json and deletes the matching knowledge entries (matched
+// by their original title), so the knowledge base returns to rules/findings
+// only. On a fresh install — no matching knowledge rows — the questions are
+// seeded from the file alone. The currency-unit question is pre-answered
+// («ریال», management's recorded decision), so 19 of 20 start open.
+function migrateQuestions() {
+  let seedList;
+  try {
+    seedList = require('../data/questions-seed.json');
+  } catch (e) {
+    console.warn('[db] questions-seed.json could not be loaded — questions migration skipped:', e.message);
+    return;
+  }
+  if (!Array.isArray(seedList) || !seedList.length) return;
+  const existing = db.prepare('SELECT COUNT(*) AS c FROM questions').get().c;
+  if (existing > 0) return;
+  const ins = db.prepare('INSERT INTO questions (group_name, question, answer, status, answered_at) VALUES (?,?,?,?,?)');
+  const delByTitle = db.prepare('DELETE FROM knowledge_entries WHERE title = ?');
+  const work = () => {
+    let removed = 0;
+    for (const q of seedList) {
+      ins.run(
+        q.group_name || '',
+        q.question,
+        q.answer || null,
+        q.status || 'در انتظار پاسخ',
+        q.answer ? new Date().toISOString() : null
+      );
+      if (q.source_title) removed += delByTitle.run(q.source_title).changes;
+    }
+    console.log(`[db] questions migration: seeded ${seedList.length} questions, removed ${removed} question entries from knowledge`);
+  };
+  if (typeof db.transaction === 'function') db.transaction(work)(); else work();
+}
+
+migrateQuestions();
 
 module.exports = {
   db, REGISTERS, EVENT_TYPE_TO_REGISTER, pickColumns, insertRegisterRow,
