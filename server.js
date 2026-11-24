@@ -17,6 +17,7 @@ const bcrypt = require('bcryptjs');
 const {
   db, REGISTERS, pickColumns, insertRegisterRow, listRegisterRows,
   classifyEvent, analyticsSummary, audit, toIntAmount, validateReceiptImage,
+  resetAllData,
 } = require('./src/db');
 const { signUser, requireAuth, requireRole, requireAgent } = require('./src/auth');
 
@@ -418,6 +419,19 @@ agent.get('/analytics/summary', (req, res) => {
 
 agent.get('/audit', (req, res) => {
   res.json(db.prepare('SELECT * FROM audit_log ORDER BY id DESC LIMIT 200').all());
+});
+
+// Factory reset: wipes ALL business data back to day one (users are kept, so
+// the admin login survives) and reseeds the 20 management questions. Guarded
+// twice: the agent key (router-wide requireAgent) and an explicit
+// {"confirm":"RESET"} body — anything else is a 400 and deletes nothing.
+agent.post('/reset', (req, res) => {
+  if (!req.body || req.body.confirm !== 'RESET') {
+    return res.status(400).json({ error: 'بازنشانی کامل نیازمند confirm با مقدار RESET است؛ چیزی حذف نشد' });
+  }
+  const result = resetAllData();
+  console.log('[agent] factory reset by pip-agent:', JSON.stringify(result.deleted));
+  return res.json({ ok: true, deleted: result.deleted, questions_reseeded: result.questions_reseeded });
 });
 
 app.use('/api/agent', agent);
