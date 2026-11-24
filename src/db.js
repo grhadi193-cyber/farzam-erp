@@ -47,6 +47,7 @@ CREATE TABLE IF NOT EXISTS events (
   event_type TEXT CHECK (event_type IN ('expense','income','payroll','unclear') OR event_type IS NULL),
   status TEXT NOT NULL DEFAULT 'unprocessed' CHECK (status IN ('unprocessed','registered','needs_review')),
   payload TEXT,
+  receipt_image TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -67,6 +68,7 @@ CREATE TABLE IF NOT EXISTS expenses (
   review_status TEXT NOT NULL DEFAULT 'در انتظار بررسی',
   record_folder TEXT,
   notes TEXT,
+  receipt_image TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -87,6 +89,7 @@ CREATE TABLE IF NOT EXISTS income (
   review_status TEXT NOT NULL DEFAULT 'در انتظار بررسی',
   record_folder TEXT,
   notes TEXT,
+  receipt_image TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -107,6 +110,7 @@ CREATE TABLE IF NOT EXISTS payroll (
   review_status TEXT NOT NULL DEFAULT 'در انتظار بررسی',
   record_folder TEXT,
   notes TEXT,
+  receipt_image TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -160,25 +164,49 @@ CREATE TABLE IF NOT EXISTS audit_log (
 );
 `);
 
+// Migration for databases created before receipt photos existed: add the
+// receipt_image column (a data URL stored with the record) wherever missing.
+for (const table of ['events', 'expenses', 'income', 'payroll']) {
+  try {
+    const cols = db.pragma(`table_info(${table})`);
+    if (Array.isArray(cols) && !cols.some((c) => c.name === 'receipt_image')) {
+      db.exec(`ALTER TABLE ${table} ADD COLUMN receipt_image TEXT`);
+      console.log(`[db] migrated: added receipt_image to ${table}`);
+    }
+  } catch (e) {
+    console.warn(`[db] receipt_image migration check failed for ${table}:`, e.message);
+  }
+}
+
+// Receipt images travel as data URLs (the client compresses to JPEG first).
+const RECEIPT_IMAGE_MAX = 2000000;
+function validateReceiptImage(v) {
+  if (v === undefined || v === null || v === '') return null;
+  if (typeof v !== 'string' || !v.startsWith('data:image/') || v.length > RECEIPT_IMAGE_MAX) {
+    return 'عکس رسید نامعتبر است؛ یک فایل تصویری با حجم مجاز انتخاب کنید';
+  }
+  return null;
+}
+
 // Register definitions: API kind -> table + writable columns.
 const REGISTERS = {
   expenses: {
     table: 'expenses',
     columns: ['date_shamsi', 'time_ir', 'person', 'telegram_ref', 'description',
       'amount_rial', 'category', 'payment_method', 'tracking_no', 'receipt_date_time',
-      'receipt_status', 'review_status', 'record_folder', 'notes'],
+      'receipt_status', 'review_status', 'record_folder', 'notes', 'receipt_image'],
   },
   income: {
     table: 'income',
     columns: ['date_shamsi', 'time_ir', 'person', 'telegram_ref', 'description',
       'amount_rial', 'account_dest', 'payment_method', 'tracking_no', 'receipt_date_time',
-      'receipt_status', 'review_status', 'record_folder', 'notes'],
+      'receipt_status', 'review_status', 'record_folder', 'notes', 'receipt_image'],
   },
   payroll: {
     table: 'payroll',
     columns: ['date_shamsi', 'time_ir', 'person', 'telegram_ref', 'description',
       'basis', 'amount_rial', 'payment_method', 'tracking_no', 'receipt_date_time',
-      'receipt_status', 'review_status', 'record_folder', 'notes'],
+      'receipt_status', 'review_status', 'record_folder', 'notes', 'receipt_image'],
   },
 };
 
@@ -202,13 +230,18 @@ function pickColumns(kind, data) {
     if (amt === null || amt < 0) return { error: 'مبلغ نامعتبر است' };
     out.amount_rial = amt;
   }
+  if (out.receipt_image !== undefined) {
+    const imgError = validateReceiptImage(out.receipt_image);
+    if (imgError) return { error: imgError };
+    if (!out.receipt_image) delete out.receipt_image; // '' or null means: no image
+  }
   return { data: out };
 }
 
 function insertRegisterRow(kind, data, eventId) {
   const { data: clean, error } = pickColumns(kind, data || {});
   if (error) return { error };
-  if (clean.receipt_status === undefined) clean.receipt_status = clean.tracking_no ? 'دارد' : 'ندارد';
+  if (clean.receipt_status === undefined) clean.receipt_status = (clean.receipt_image || clean.tracking_no) ? 'دارد' : 'ندارد';
   if (clean.review_status === undefined) clean.review_status = 'در انتظار بررسی';
   if (clean.amount_rial === undefined) clean.amount_rial = 0;
   const cols = Object.keys(clean);
@@ -253,6 +286,9 @@ function classifyEvent(eventId, input, actor) {
     ...(input.register || input),
   };
   delete merged.event_type;
+  // The event keeps its own copy of the receipt photo (payload / column);
+  // the register row created from it inherits the same image.
+  if (!merged.receipt_image && ev.receipt_image) merged.receipt_image = ev.receipt_image;
   const { row, error } = insertRegisterRow(kind, merged, eventId);
   if (error) return { status: 400, body: { error } };
   db.prepare("UPDATE events SET event_type = ?, status = 'registered' WHERE id = ?").run(type, eventId);
@@ -346,4 +382,5 @@ seed();
 module.exports = {
   db, REGISTERS, EVENT_TYPE_TO_REGISTER, pickColumns, insertRegisterRow,
   listRegisterRows, classifyEvent, analyticsSummary, audit, toIntAmount,
+  validateReceiptImage, RECEIPT_IMAGE_MAX,
 };

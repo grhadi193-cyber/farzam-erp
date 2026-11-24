@@ -13,6 +13,84 @@ const unitName = () => (unit === 'toman' ? 'تومان' : 'ریال');
 const faMoney = (n) => faNum(Math.round(Number(n || 0) / unitDiv())) + ' ' + unitName();
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
+// ---------- Receipt photos ----------
+// Photos are compressed in the browser (canvas, max 1200px, JPEG 0.82) into a
+// data URL and stored with the record as receipt_image. No photo keeps the
+// exact old behaviour: the record simply reads «رسید ندارد».
+const photoStore = {};
+
+function fileToDataURL(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const max = 1200;
+      const scale = Math.min(1, max / Math.max(img.width, img.height));
+      const w = Math.max(1, Math.round(img.width * scale));
+      const h = Math.max(1, Math.round(img.height * scale));
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+      resolve(canvas.toDataURL('image/jpeg', 0.82));
+    };
+    img.onerror = (e) => { URL.revokeObjectURL(url); reject(e); };
+    img.src = url;
+  });
+}
+
+function photoFieldHTML(prefix) {
+  return `<label>عکس رسید / فیش (اختیاری)
+    <input type="file" id="photo-${prefix}" accept="image/*">
+    <img id="photo-prev-${prefix}" class="photo-preview hidden" alt="پیش‌نمایش رسید">
+    <span class="photo-hint">عکس به‌صورت خودکار فشرده و همراه رکورد ذخیره می‌شود؛ بدون عکس، رکورد «رسید ندارد» می‌ماند.</span>
+  </label>`;
+}
+
+function wirePhotoField(prefix) {
+  const input = document.getElementById('photo-' + prefix);
+  if (!input) return;
+  input.addEventListener('change', async () => {
+    const file = input.files && input.files[0];
+    if (!file) return;
+    try {
+      photoStore[prefix] = await fileToDataURL(file);
+      const prev = document.getElementById('photo-prev-' + prefix);
+      if (prev) { prev.src = photoStore[prefix]; prev.classList.remove('hidden'); }
+    } catch (_) {
+      alert('خواندن عکس ممکن نشد؛ یک فایل تصویری انتخاب کنید.');
+    }
+  });
+}
+
+function thumbHTML(src) {
+  return src ? `<img class="thumb" src="${esc(src)}" alt="عکس رسید" title="برای بزرگ‌نمایی کلیک کنید">` : '';
+}
+
+// Full-size image viewer (one shared modal; thumbnails delegate to it).
+function ensureImgModal() {
+  if (document.getElementById('img-modal')) return;
+  const d = document.createElement('div');
+  d.id = 'img-modal';
+  d.className = 'img-modal hidden';
+  d.innerHTML = '<img id="img-modal-img" alt="عکس رسید">';
+  d.addEventListener('click', () => d.classList.add('hidden'));
+  document.body.appendChild(d);
+}
+document.addEventListener('click', (e) => {
+  const t = e.target.closest('img.thumb');
+  if (!t) return;
+  ensureImgModal();
+  document.getElementById('img-modal-img').src = t.src;
+  document.getElementById('img-modal').classList.remove('hidden');
+});
+
+// Colored chip class for a review status (viewer rendering).
+const statusCls = (s) => (s === 'تأیید شده' ? 'ok'
+  : (s === 'رد شده' || String(s || '').includes('تکراری')) ? 'bad'
+  : (s === 'نیازمند تکمیل' || s === 'ناقص') ? 'warn' : '');
+
 let token = localStorage.getItem('farzam_token') || '';
 let currentUser = null;
 
@@ -115,9 +193,10 @@ function loadTab(name) {
   $$('main .panel').forEach((p) => p.classList.add('hidden'));
   $('#tab-' + name).classList.remove('hidden');
   const loaders = {
-    dashboard: loadDashboard, intake: loadIntake,
+    dashboard: loadDashboard, intake: loadIntake, monitoring: loadMonitoring,
     expenses: () => loadRegister('expenses'), income: () => loadRegister('income'), payroll: () => loadRegister('payroll'),
-    ledgers: loadLedgers, customers: loadCustomers, products: loadProducts, knowledge: loadKnowledge,
+    ledgers: loadLedgers, customers: loadCustomers, products: loadProducts,
+    questions: loadQuestions, knowledge: loadKnowledge,
   };
   if (loaders[name]) loaders[name]();
 }
@@ -144,7 +223,7 @@ async function loadDashboard() {
         .reduce((a, r) => a + Number(r.amount_rial || 0), 0);
     } catch (_) { /* card is hidden if the register cannot be read */ }
     const kpi = (lbl, val, cap, cls = '') =>
-      `<div class="kpi"><div class="kpi-lbl">${lbl}</div><div class="kpi-num ${cls}">${val}</div><div class="kpi-cap">${cap}</div></div>`;
+      `<div class="kpi"><div class="kpi-lbl"><span class="kpi-dot ${cls}"></span>${lbl}</div><div class="kpi-num ${cls}">${val}</div><div class="kpi-cap">${cap}</div></div>`;
     el.innerHTML = `
       <div class="kpis">
         ${kpi('جمع هزینه‌های ثبت‌شده', faMoney(t.expenses_rial), `${faNum(c.expenses)} رکورد از ربات و پنل`, 'neg')}
@@ -227,6 +306,64 @@ function donutChart(cats) {
     <text x="90" y="95" text-anchor="middle" font-size="13">${faMoney(total)}</text></svg><div>${legend}</div></div>`;
 }
 
+// ---------- Monitoring & analytics ----------
+async function loadMonitoring() {
+  const el = $('#tab-monitoring');
+  el.innerHTML = '<p class="muted">در حال بارگذاری…</p>';
+  try {
+    const s = await api('/api/analytics/summary');
+    const t = s.totals;
+    const rows = await api('/api/registers/expenses').catch(() => []);
+    const kn = await api('/api/knowledge').catch(() => []);
+    // Per-person expense totals, from the register itself.
+    const byPerson = {};
+    rows.forEach((r) => {
+      const p = r.person || 'نامشخص';
+      byPerson[p] = (byPerson[p] || 0) + Number(r.amount_rial || 0);
+    });
+    const personRows = Object.entries(byPerson).sort((a, b) => b[1] - a[1]);
+    // Automatic alerts: real gaps in the data, not guesses.
+    const alerts = [];
+    const noReceipt = rows.filter((r) => r.receipt_status === 'ندارد' && Number(r.amount_rial || 0) > 0);
+    if (noReceipt.length) alerts.push(`${faNum(noReceipt.length)} هزینه بدون رسید ثبت شده است — جمع ${faMoney(noReceipt.reduce((a, r) => a + Number(r.amount_rial || 0), 0))}`);
+    const dup = rows.filter((r) => (r.review_status || '').includes('تکراری'));
+    if (dup.length) alerts.push(`ردیف تکراری باطری هنوز در انتظار تصمیم شماست — ${faMoney(dup.reduce((a, r) => a + Number(r.amount_rial || 0), 0))} در جمع هزینه‌ها هست`);
+    const incomplete = rows.filter((r) => ['نیازمند تکمیل', 'ناقص'].includes(r.review_status));
+    if (incomplete.length) alerts.push(`${faNum(incomplete.length)} رکورد نیازمند تکمیل است (مبلغ یا شرح ناقص)`);
+    if (s.events.unprocessed) alerts.push(`${faNum(s.events.unprocessed)} رویداد پردازش‌نشده در ورودی یکپارچه منتظر طبقه‌بندی است`);
+    if (s.unclear_count) alerts.push(`${faNum(s.unclear_count)} مورد نیازمند بررسی در صف تصمیم است`);
+    const openQ = kn.filter((r) => r.title.startsWith('پرسش مدیریت') && !r.body.includes('پاسخ مدیریت')).length;
+    if (openQ) alerts.push(`${faNum(openQ)} پرسش مدیریت هنوز بی‌پاسخ است — پاسخ‌ها موجودی افتتاحیه و پیش‌بینی نقدینگی را روشن می‌کنند`);
+    if (!t.income_rial) alerts.push('هنوز درآمدی ثبت نشده است؛ تراز فقط هزینه‌ها را نشان می‌دهد، نه مانده حساب‌ها را');
+    const quality = rows.length ? Math.round(100 * rows.filter((r) => r.receipt_status === 'دارد' || Number(r.amount_rial || 0) === 0).length / rows.length) : 100;
+    el.innerHTML = `
+      <div class="grid2">
+        <div class="card"><h2 class="sec">مقایسه جریان مالی (${unitName()})</h2>${barChart([
+          { label: 'درآمد', value: t.income_rial, color: '#2f8f5b' },
+          { label: 'هزینه', value: t.expenses_rial, color: '#a83a26' },
+          { label: 'حقوق', value: t.payroll_rial, color: '#102333' },
+        ])}</div>
+        <div class="card"><h2 class="sec">سهم دسته‌های هزینه</h2>${donutChart(s.expenses_by_category)}</div>
+      </div>
+      <div class="grid2" style="margin-top:12px">
+        <div class="card"><h2 class="sec">هزینه به تفکیک شخص</h2>
+          ${personRows.length ? `<table><tr><th>شخص</th><th>جمع (${unitName()})</th></tr>${personRows.map(([p, v]) => `<tr><td>${esc(p)}</td><td>${faMoney(v)}</td></tr>`).join('')}</table>` : '<div class="empty">هنوز هزینه‌ای ثبت نشده است</div>'}
+        </div>
+        <div class="card"><h2 class="sec">شاخص‌های کیفیت داده</h2>
+          <div class="kpi-lbl">پوشش رسید</div><div class="kpi-num">${faNum(quality)}٪</div>
+          <div class="kpi-cap">سهم رکوردهای هزینه با رسید (یا مبلغ صفر) از کل رکوردها</div>
+          <div class="kpi-lbl" style="margin-top:10px">موارد نیازمند پیگیری</div><div class="kpi-num ${s.unclear_count ? 'warn-num' : ''}">${faNum(s.unclear_count)}</div>
+          <div class="kpi-cap">پردازش‌نشده: ${faNum(s.events.unprocessed)} — نیازمند بررسی: ${faNum(s.events.needs_review)}</div>
+        </div>
+      </div>
+      <div class="card" style="margin-top:12px"><h2 class="sec">هشدارهای خودکار</h2>
+        ${alerts.length ? `<ul style="margin:0;padding-inline-start:18px">${alerts.map((a) => `<li>${esc(a)}</li>`).join('')}</ul>` : '<div class="empty">هشداری نیست — داده‌ها کامل‌اند</div>'}
+      </div>`;
+  } catch (err) {
+    el.innerHTML = `<div class="error">${esc(err.message)}</div>`;
+  }
+}
+
 // ---------- Universal intake ----------
 const TYPE_FA = { expense: 'هزینه', income: 'درآمد', payroll: 'حقوق', unclear: 'نامشخص' };
 const STATUS_FA = { unprocessed: 'پردازش‌نشده', registered: 'ثبت‌شده', needs_review: 'نیازمند بررسی' };
@@ -244,6 +381,7 @@ async function loadIntake() {
         </label>
         <label>مبلغ (ریال) — اختیاری<input name="amount_rial" type="number" min="0" placeholder="20000000"></label>
         <label>نام ثبت‌کننده<input name="sender_name" value="${esc(currentUser.name)}"></label>
+        ${photoFieldHTML('ev')}
       </div>
       <button class="btn primary" type="submit">ثبت رویداد</button>
     </form>` : ''}
@@ -251,14 +389,18 @@ async function loadIntake() {
       ${events.length ? events.map(eventCard).join('') : '<div class="empty">هنوز رویدادی ثبت نشده است</div>'}
     </div>`;
   const form = $('#event-form');
-  if (form) form.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const fd = new FormData(form);
-    try {
-      await api('/api/events', { method: 'POST', body: { raw_text: fd.get('raw_text'), sender_name: fd.get('sender_name'), amount_rial: fd.get('amount_rial') || undefined } });
-      loadIntake();
-    } catch (err) { alert(err.message); }
-  });
+  if (form) {
+    wirePhotoField('ev');
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const fd = new FormData(form);
+      try {
+        await api('/api/events', { method: 'POST', body: { raw_text: fd.get('raw_text'), sender_name: fd.get('sender_name'), amount_rial: fd.get('amount_rial') || undefined, receipt_image: photoStore.ev || undefined } });
+        delete photoStore.ev;
+        loadIntake();
+      } catch (err) { alert(err.message); }
+    });
+  }
   $$('.classify-btn', el).forEach((btn) => btn.addEventListener('click', async () => {
     const id = btn.dataset.id;
     const wrap = btn.closest('.event-card');
@@ -275,8 +417,10 @@ async function loadIntake() {
 function eventCard(ev) {
   const badgeCls = ev.status === 'registered' ? 'ok' : ev.status === 'needs_review' ? 'bad' : 'warn';
   const payloadAmount = ev.payload && ev.payload.amount_rial ? faMoney(ev.payload.amount_rial) : '';
+  const evImg = ev.receipt_image || (ev.payload && ev.payload.receipt_image);
   return `<div class="event-card">
     <div class="raw">${esc(ev.raw_text || '(بدون متن)')}</div>
+    ${evImg ? `<div class="ev-photo">${thumbHTML(evImg)}</div>` : ''}
     <div class="muted">${esc(ev.sender_name || '')} ${ev.sender_ref ? '— ' + esc(ev.sender_ref) : ''} · منبع: ${esc(ev.source)} ${payloadAmount ? '· مبلغ پیام: ' + payloadAmount : ''}</div>
     <div><span class="badge ${badgeCls}">${STATUS_FA[ev.status] || ev.status}</span>
     ${ev.event_type ? `<span class="badge">${TYPE_FA[ev.event_type] || ev.event_type}</span>` : ''}</div>
@@ -325,7 +469,7 @@ const REGISTER_CONF = {
     cols: [['date_shamsi', 'تاریخ'], ['person', 'کارمند'], ['basis', 'بابت'], ['description', 'شرح'], ['amount_rial', 'مبلغ', 'money'], ['tracking_no', 'پیگیری'], ['receipt_status', 'فیش']],
   },
 };
-const REVIEW_STATUSES = ['در انتظار بررسی', 'تأیید شده', 'ناقص', 'رد شده'];
+const REVIEW_STATUSES = ['در انتظار بررسی', 'تأیید شده', 'ناقص', 'نیازمند تکمیل', 'تکراری — در انتظار تصمیم', 'رد شده'];
 
 async function loadRegister(kind) {
   const conf = REGISTER_CONF[kind];
@@ -339,25 +483,35 @@ async function loadRegister(kind) {
       <div class="form-grid">
         ${conf.fields.map(([name, label, type]) => `<label>${label}<input name="${name}" ${type === 'number' ? 'type="number" min="0"' : ''} ${name === 'amount_rial' || name === 'description' ? 'required' : ''}></label>`).join('')}
         <label>رسید / فیش<select name="receipt_status"><option>ندارد</option><option>دارد</option></select></label>
+        ${photoFieldHTML('reg')}
       </div>
       <button class="btn primary" type="submit">ثبت</button>
     </form>` : ''}
     <div class="card" style="margin-bottom:12px"><span class="lbl">جمع ${conf.title}: </span><b>${faMoney(total)}</b> — ${faNum(rows.length)} رکورد</div>
     ${rows.length ? `<div style="overflow-x:auto"><table><tr>${conf.cols.map((c) => `<th>${c[1]}</th>`).join('')}<th>وضعیت بررسی</th>${canWrite() ? '<th></th>' : ''}</tr>
       ${rows.map((r) => `<tr>
-        ${conf.cols.map(([name, , kind2]) => `<td>${kind2 === 'money' ? faMoney(r[name]) : esc(r[name] ?? '')}</td>`).join('')}
-        <td>${canWrite() ? `<select class="rv-sel" data-id="${r.id}">${REVIEW_STATUSES.map((s) => `<option ${s === r.review_status ? 'selected' : ''}>${s}</option>`).join('')}</select>` : `<span class="badge">${esc(r.review_status)}</span>`}</td>
+        ${conf.cols.map(([name, , kind2]) => (name === 'receipt_status'
+          ? `<td>${thumbHTML(r.receipt_image)} ${esc(r.receipt_status ?? '')}</td>`
+          : `<td>${kind2 === 'money' ? faMoney(r[name]) : esc(r[name] ?? '')}</td>`)).join('')}
+        <td>${canWrite() ? `<select class="rv-sel" data-id="${r.id}">${REVIEW_STATUSES.map((s) => `<option ${s === r.review_status ? 'selected' : ''}>${s}</option>`).join('')}</select>` : `<span class="badge ${statusCls(r.review_status)}">${esc(r.review_status)}</span>`}</td>
         ${canWrite() ? `<td><button class="btn small rv-save" data-id="${r.id}">ذخیره</button></td>` : ''}
       </tr>`).join('')}
     </table></div>` : '<div class="empty">هنوز رکوردی ثبت نشده است</div>'}`;
   const form = $('#reg-form', el);
-  if (form) form.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const body = {};
-    new FormData(form).forEach((v, k) => { if (v !== '') body[k] = k === 'amount_rial' ? Number(v) : v; });
-    try { await api(`/api/registers/${kind}`, { method: 'POST', body }); loadRegister(kind); }
-    catch (err) { alert(err.message); }
-  });
+  if (form) {
+    wirePhotoField('reg');
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const body = {};
+      new FormData(form).forEach((v, k) => { if (v !== '') body[k] = k === 'amount_rial' ? Number(v) : v; });
+      if (photoStore.reg) { body.receipt_image = photoStore.reg; body.receipt_status = 'دارد'; }
+      try {
+        await api(`/api/registers/${kind}`, { method: 'POST', body });
+        delete photoStore.reg;
+        loadRegister(kind);
+      } catch (err) { alert(err.message); }
+    });
+  }
   $$('.rv-save', el).forEach((btn) => btn.addEventListener('click', async () => {
     const sel = $(`.rv-sel[data-id="${btn.dataset.id}"]`, el);
     try { await api(`/api/registers/${kind}/${btn.dataset.id}`, { method: 'PATCH', body: { review_status: sel.value } }); loadRegister(kind); }
@@ -479,6 +633,45 @@ async function loadKnowledge() {
     try { await api('/api/knowledge', { method: 'POST', body }); loadKnowledge(); }
     catch (err) { alert(err.message); }
   });
+}
+
+// ---------- Management questions ----------
+// Questions live in knowledge_entries as kind 'note' with the
+// 'پرسش مدیریت' title prefix (the kind CHECK only allows rule/answer/note,
+// so no schema change was needed on the live database).
+const Q_PREFIX = 'پرسش مدیریت';
+async function loadQuestions() {
+  const el = $('#tab-questions');
+  el.innerHTML = '<p class="muted">در حال بارگذاری…</p>';
+  try {
+    const rows = (await api('/api/knowledge')).filter((r) => r.title.startsWith(Q_PREFIX));
+    const badge = document.getElementById('badge-questions');
+    const open = rows.filter((r) => !r.body.includes('پاسخ مدیریت')).length;
+    if (badge) badge.textContent = open ? faNum(open) : '';
+    el.innerHTML = `
+      <div class="card" style="margin-bottom:12px"><span class="lbl">پرسش‌های مدیریت: </span><b>${faNum(rows.length)} پرسش</b> — ${faNum(open)} بی‌پاسخ، ${faNum(rows.length - open)} پاسخ‌داده‌شده. پاسخ هر پرسش، حتی تقریبی، کار را جلو می‌برد.</div>
+      ${canWrite() ? `<form class="form-card" id="q-form"><h2 class="sec">پرسش جدید از مدیریت</h2>
+        <div class="form-grid">
+          <label style="grid-column: span 2">متن پرسش<input name="title" required placeholder="پرسش مدیریت: …"></label>
+          <label style="grid-column: span 2">گروه<input name="body" placeholder="گروه: …"></label>
+        </div><button class="btn primary" type="submit">ثبت پرسش</button></form>` : ''}
+      ${rows.length ? rows.map((r) => {
+        const answered = r.body.includes('پاسخ مدیریت');
+        return `<div class="kitem"><h3>${esc(r.title)} <span class="badge ${answered ? 'ok' : 'warn'}">${answered ? 'پاسخ داده شده' : 'بی‌پاسخ'}</span></h3><div>${esc(r.body || '')}</div></div>`;
+      }).join('') : '<div class="empty">هنوز پرسشی ثبت نشده است</div>'}`;
+    const form = $('#q-form', el);
+    if (form) form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const fd = new FormData(form);
+      const title = String(fd.get('title') || '').trim();
+      try {
+        await api('/api/knowledge', { method: 'POST', body: { title: title.startsWith(Q_PREFIX) ? title : `${Q_PREFIX} ${title}`, body: String(fd.get('body') || ''), kind: 'note' } });
+        loadQuestions();
+      } catch (err) { alert(err.message); }
+    });
+  } catch (err) {
+    el.innerHTML = `<div class="error">${esc(err.message)}</div>`;
+  }
 }
 
 // ---------- Boot ----------

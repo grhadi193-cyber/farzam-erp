@@ -16,12 +16,14 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 const {
   db, REGISTERS, pickColumns, insertRegisterRow, listRegisterRows,
-  classifyEvent, analyticsSummary, audit, toIntAmount,
+  classifyEvent, analyticsSummary, audit, toIntAmount, validateReceiptImage,
 } = require('./src/db');
 const { signUser, requireAuth, requireRole, requireAgent } = require('./src/auth');
 
 const app = express();
-app.use(express.json({ limit: '2mb' }));
+// 4mb so a receipt photo data URL (validated to ~2,000,000 chars) plus the
+// rest of the JSON body always fits.
+app.use(express.json({ limit: '4mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 const PORT = Number(process.env.PORT || 3000);
@@ -81,14 +83,20 @@ app.post('/api/events', requireAuth, requireRole(...EVENT_CREATE_ROLES), (req, r
   const payload = b.payload && typeof b.payload === 'object' ? b.payload : {};
   if (b.amount_rial !== undefined) payload.amount_rial = b.amount_rial;
   if (b.description) payload.description = b.description;
+  // Optional receipt photo (data URL). It lives in the payload so classify
+  // passes it to the register row, and in its own column on the event.
+  if (b.receipt_image !== undefined) payload.receipt_image = b.receipt_image;
+  const imgError = validateReceiptImage(payload.receipt_image);
+  if (imgError) return res.status(400).json({ error: imgError });
   const info = db.prepare(
-    'INSERT INTO events (source, sender_name, sender_ref, raw_text, payload) VALUES (?,?,?,?,?)'
+    'INSERT INTO events (source, sender_name, sender_ref, raw_text, payload, receipt_image) VALUES (?,?,?,?,?,?)'
   ).run(
     b.source || 'manual',
     b.sender_name || req.user.name || '',
     b.sender_ref || '',
     b.raw_text || b.description || '',
-    JSON.stringify(payload)
+    JSON.stringify(payload),
+    payload.receipt_image || null
   );
   return res.status(201).json(db.prepare('SELECT * FROM events WHERE id = ?').get(info.lastInsertRowid));
 });

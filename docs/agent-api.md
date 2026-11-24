@@ -31,8 +31,10 @@ Every agent **write** inserts a row into `audit_log` with actor `pip-agent`, the
 
 ## Register row fields
 
-Common: `date_shamsi`, `time_ir`, `person`, `telegram_ref`, `description`, `amount_rial` (integer, Rial), `payment_method`, `tracking_no`, `receipt_date_time`, `receipt_status` (دارد/ندارد), `review_status`, `record_folder`, `notes`.
+Common: `date_shamsi`, `time_ir`, `person`, `telegram_ref`, `description`, `amount_rial` (integer, Rial), `payment_method`, `tracking_no`, `receipt_date_time`, `receipt_status` (دارد/ندارد), `review_status`, `record_folder`, `notes`, `receipt_image`.
 Expenses add `category`; income adds `account_dest`; payroll adds `basis`.
+
+`receipt_image` is the receipt photo stored with the record as a data URL. When present it must be a string starting with `data:image/` and at most 2,000,000 characters, otherwise the write is rejected with HTTP 400. A row created with a `receipt_image` defaults `receipt_status` to دارد when the caller does not set it. Intake events carry the same field (top level or inside `payload`); classifying such an event copies the image into the created register row, and the event keeps its own copy.
 
 ## Example
 
