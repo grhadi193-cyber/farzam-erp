@@ -11,6 +11,12 @@ if (process.env.TURSO_DATABASE_URL) {
   db = new Database(process.env.TURSO_DATABASE_URL, {
     authToken: process.env.TURSO_AUTH_TOKEN || '',
   });
+} else if (process.env.VERCEL) {
+  // Vercel without a remote database: the deployment bundle is read-only, so
+  // fall back to /tmp. The app boots and works, but data resets on cold
+  // starts — set TURSO_DATABASE_URL + TURSO_AUTH_TOKEN for persistence.
+  db = new Database('/tmp/farzam.db');
+  console.warn('[db] TURSO_DATABASE_URL is not set: using ephemeral /tmp storage on Vercel. Data will reset — set TURSO_DATABASE_URL and TURSO_AUTH_TOKEN for a persistent database.');
 } else {
   const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '..', 'data');
   fs.mkdirSync(DATA_DIR, { recursive: true });
