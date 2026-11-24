@@ -22,6 +22,10 @@ Every agent **write** inserts a row into `audit_log` with actor `pip-agent`, the
 | POST | `/api/agent/ledgers` | Create a ledger item (audited) |
 | GET | `/api/agent/knowledge` | List knowledge entries |
 | POST | `/api/agent/knowledge` | Create a knowledge entry (audited) |
+| GET | `/api/agent/customers` | List customers (master data) |
+| POST | `/api/agent/customers` | Create a customer (audited). Body: `{ "name", "code", "national_id", "phone", "notes" }`; `name` is required, returns 201 with the row |
+| GET | `/api/agent/products` | List products (master data) |
+| POST | `/api/agent/products` | Create a product (audited). Body: `{ "name", "code", "unit", "sale_price_rial", "notes" }`; `name` is required, `sale_price_rial` is integer Rial, returns 201 with the row |
 | GET | `/api/agent/analytics/summary` | Totals per register (Rial), net, counts, unclear count, expenses by category, open ledgers |
 | GET | `/api/agent/audit` | Latest audit-log rows |
 

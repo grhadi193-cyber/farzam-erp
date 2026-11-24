@@ -5,7 +5,12 @@ const $ = (sel, el) => (el || document).querySelector(sel);
 const $$ = (sel, el) => Array.from((el || document).querySelectorAll(sel));
 
 const faNum = (n) => Number(n || 0).toLocaleString('fa-IR');
-const faMoney = (n) => faNum(n) + ' ریال';
+// Display unit only: amounts are always stored in Rial. The تومان view
+// divides by 10 for display and never touches stored values.
+let unit = localStorage.getItem('farzam_unit') || 'rial';
+const unitDiv = () => (unit === 'toman' ? 10 : 1);
+const unitName = () => (unit === 'toman' ? 'تومان' : 'ریال');
+const faMoney = (n) => faNum(Math.round(Number(n || 0) / unitDiv())) + ' ' + unitName();
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 let token = localStorage.getItem('farzam_token') || '';
@@ -51,11 +56,48 @@ $('#logout-btn').addEventListener('click', () => {
   $('#login-view').classList.remove('hidden');
 });
 
+// ---------- Unit toggle & refresh ----------
+let currentTab = 'dashboard';
+
+function applyUnitUI() {
+  $$('#unit-toggle .unit-btn').forEach((b) => b.classList.toggle('active', b.dataset.unit === unit));
+}
+
+$('#unit-toggle').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-unit]');
+  if (!btn || btn.dataset.unit === unit) return;
+  unit = btn.dataset.unit;
+  localStorage.setItem('farzam_unit', unit);
+  applyUnitUI();
+  loadTab(currentTab);
+});
+
+$('#refresh-btn').addEventListener('click', () => {
+  loadBadges();
+  loadTab(currentTab);
+});
+
+function renderBadges(s) {
+  const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v ? faNum(v) : ''; };
+  set('badge-expenses', s.counts.expenses);
+  set('badge-customers', s.counts.customers);
+  set('badge-intake', s.events.unprocessed);
+  const lu = document.getElementById('last-update');
+  if (lu) lu.textContent = new Date().toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' });
+}
+
+async function loadBadges() {
+  if (!token) return;
+  try { renderBadges(await api('/api/analytics/summary')); } catch (_) { /* badges are best-effort */ }
+}
+
 function showApp() {
   $('#login-view').classList.add('hidden');
   $('#app-view').classList.remove('hidden');
   const roleFa = { admin: 'مدیر', finance: 'مالی', employee: 'کارمند', viewer: 'مشاهده‌گر' };
   $('#user-info').textContent = `${currentUser.name} — ${roleFa[currentUser.role] || currentUser.role}`;
+  applyUnitUI();
+  loadBadges();
   loadTab('dashboard');
 }
 
@@ -69,6 +111,7 @@ $('#tabs').addEventListener('click', (e) => {
 
 const loaded = {};
 function loadTab(name) {
+  currentTab = name;
   $$('main .panel').forEach((p) => p.classList.add('hidden'));
   $('#tab-' + name).classList.remove('hidden');
   const loaders = {
@@ -85,41 +128,82 @@ async function loadDashboard() {
   el.innerHTML = '<p class="muted">در حال بارگذاری…</p>';
   try {
     const s = await api('/api/analytics/summary');
+    renderBadges(s);
     const t = s.totals;
+    const c = s.counts;
+    const lo = {};
+    s.ledger_open.forEach((r) => { lo[r.kind] = r; });
+    const rec = lo.receivable || { total: 0, count: 0 };
+    const pay = lo.payable || { total: 0, count: 0 };
+    const chq = lo.cheque || { total: 0, count: 0 };
+    // Confirmed expenses (review_status تأیید شده) — the panel's «هزینه قطعی».
+    let confirmedExp = null;
+    try {
+      const rows = await api('/api/registers/expenses');
+      confirmedExp = rows.filter((r) => r.review_status === 'تأیید شده')
+        .reduce((a, r) => a + Number(r.amount_rial || 0), 0);
+    } catch (_) { /* card is hidden if the register cannot be read */ }
+    const kpi = (lbl, val, cap, cls = '') =>
+      `<div class="kpi"><div class="kpi-lbl">${lbl}</div><div class="kpi-num ${cls}">${val}</div><div class="kpi-cap">${cap}</div></div>`;
     el.innerHTML = `
-      <div class="cards">
-        <div class="card"><div class="lbl">جمع درآمدها</div><div class="num">${faMoney(t.income_rial)}</div><div class="muted">${faNum(s.counts.income)} رکورد</div></div>
-        <div class="card"><div class="lbl">جمع هزینه‌ها</div><div class="num">${faMoney(t.expenses_rial)}</div><div class="muted">${faNum(s.counts.expenses)} رکورد</div></div>
-        <div class="card"><div class="lbl">جمع حقوق</div><div class="num">${faMoney(t.payroll_rial)}</div><div class="muted">${faNum(s.counts.payroll)} رکورد</div></div>
-        <div class="card"><div class="lbl">خالص (درآمد − هزینه − حقوق)</div><div class="num">${faMoney(t.net_rial)}</div></div>
-        <div class="card ${s.unclear_count ? 'alert' : ''}"><div class="lbl">رویداد نامشخص / نیازمند بررسی</div><div class="num">${faNum(s.unclear_count)}</div><div class="muted">پردازش‌نشده: ${faNum(s.events.unprocessed)} — ثبت‌شده: ${faNum(s.events.registered)}</div></div>
+      <div class="kpis">
+        ${kpi('جمع هزینه‌های ثبت‌شده', faMoney(t.expenses_rial), `${faNum(c.expenses)} رکورد از ربات و پنل`, 'neg')}
+        ${confirmedExp !== null ? kpi('هزینه قطعی (تأییدشده)', faMoney(confirmedExp), 'فقط ردیف‌های تأییدشده از جمع بالا', 'neg') : ''}
+        ${kpi('جمع درآمدهای ثبت‌شده', faMoney(t.income_rial), c.income ? `${faNum(c.income)} رکورد` : 'هنوز رکوردی ثبت نشده', 'pos')}
+        ${kpi('تراز ثبت‌شده (درآمد − هزینه − حقوق)', faMoney(t.net_rial), 'مانده حساب‌ها نیست؛ فقط جمع همین ثبت‌هاست', t.net_rial < 0 ? 'neg' : 'pos')}
+        ${kpi('جمع حقوق و دستمزد', faMoney(t.payroll_rial), c.payroll ? `${faNum(c.payroll)} رکورد` : 'هنوز رکوردی ثبت نشده')}
+        ${kpi('جمع کل خروجی (هزینه + حقوق)', faMoney(t.expenses_rial + t.payroll_rial), 'کل پول خارج‌شده ثبت‌شده از شرکت', 'neg')}
+        ${kpi('دریافتنی‌های باز', faMoney(rec.total), rec.count ? `${faNum(rec.count)} مورد باز` : 'طلب بازی ثبت نشده', 'pos')}
+        ${kpi('پرداختنی‌های باز', faMoney(pay.total), pay.count ? `${faNum(pay.count)} مورد باز` : 'بدهی بازی ثبت نشده')}
+        ${kpi('چک‌های در جریان', faNum(chq.count), `مجموع مبلغ: ${faMoney(chq.total)}`)}
+        ${kpi('موارد نیازمند پیگیری', faNum(s.unclear_count), `پردازش‌نشده: ${faNum(s.events.unprocessed)} — نیازمند بررسی: ${faNum(s.events.needs_review)}`, s.unclear_count ? 'warn-num' : '')}
+        ${kpi('مشتریان', faNum(c.customers), 'مشتری ثبت‌شده در داده‌های پایه')}
+        ${kpi('کالاها', faNum(c.products), 'کالای ثبت‌شده در داده‌های پایه')}
+      </div>
+      <div class="intake-banner">
+        <div class="banner-head">
+          <h2>کانال یک‌پیامی شرکت — راحت‌ترین راه ارتباط مالی</h2>
+          <button type="button" class="btn primary" id="goto-intake">رفتن به ورودی یکپارچه</button>
+        </div>
+        <p>کارمند فقط یک پیام آزاد می‌فرستد — متن، و اگر دارد عکس رسید — از ربات تلگرام یا از تب «ورودی یکپارچه» همین پنل. سیستم خودش نوع رویداد را تشخیص می‌دهد، مبلغ را می‌خواند و در ماژول درست ثبت می‌کند؛ چیزی که نوعش قطعی نباشد حدس زده نمی‌شود و می‌رود به صف تصمیم شما.</p>
+        <div class="chips">
+          <div class="chip"><span class="badge bad">خرید / هزینه</span><p>«خریدیم ۵۰ رام کاغذ A4، دو میلیون و چهارصد هزار تومان، از کارت شرکت» + عکس رسید</p></div>
+          <div class="chip"><span class="badge ok">فروش / وصولی</span><p>«فروختیم ۱۰ تا ردیاب GT08 به شرکت نمونه، فاکتور ۱۲۳، واریز شد به حساب شرکت»</p></div>
+          <div class="chip"><span class="badge navy">حقوق</span><p>«حقوق آبان رضا پرداخت شد، ۱۸ میلیون تومان، حواله به حساب خودش»</p></div>
+        </div>
       </div>
       <div class="grid2">
-        <div class="card"><h2 class="sec">مقایسه جریان مالی (ریال)</h2>${barChart([
-          { label: 'درآمد', value: t.income_rial, color: '#0e7c5b' },
-          { label: 'هزینه', value: t.expenses_rial, color: '#b3261e' },
+        <div class="card"><h2 class="sec">مقایسه جریان مالی (${unitName()})</h2>${barChart([
+          { label: 'درآمد', value: t.income_rial, color: '#2f8f5b' },
+          { label: 'هزینه', value: t.expenses_rial, color: '#a83a26' },
           { label: 'حقوق', value: t.payroll_rial, color: '#102333' },
         ])}</div>
         <div class="card"><h2 class="sec">سهم دسته‌های هزینه</h2>${donutChart(s.expenses_by_category)}</div>
       </div>
       <div class="card" style="margin-top:12px"><h2 class="sec">دفاتر باز</h2>
-        ${s.ledger_open.length ? `<table><tr><th>نوع</th><th>تعداد</th><th>جمع (ریال)</th></tr>${s.ledger_open.map((r) => `<tr><td>${ledgerKindFa(r.kind)}</td><td>${faNum(r.count)}</td><td>${faMoney(r.total)}</td></tr>`).join('')}</table>` : '<div class="empty">دفتر بازی وجود ندارد</div>'}
+        ${s.ledger_open.length ? `<table><tr><th>نوع</th><th>تعداد</th><th>جمع (${unitName()})</th></tr>${s.ledger_open.map((r) => `<tr><td>${ledgerKindFa(r.kind)}</td><td>${faNum(r.count)}</td><td>${faMoney(r.total)}</td></tr>`).join('')}</table>` : '<div class="empty">دفتر بازی وجود ندارد</div>'}
       </div>`;
+    const gi = $('#goto-intake', el);
+    if (gi) gi.addEventListener('click', () => {
+      $$('#tabs .tab').forEach((tb) => tb.classList.toggle('active', tb.dataset.tab === 'intake'));
+      loadTab('intake');
+    });
   } catch (err) {
     el.innerHTML = `<div class="error">${esc(err.message)}</div>`;
   }
 }
 
 function barChart(items) {
-  const max = Math.max(...items.map((i) => i.value), 1);
+  const dv = (v) => Math.round(Number(v || 0) / unitDiv());
+  const max = Math.max(...items.map((i) => dv(i.value)), 1);
   const W = 460, H = 190, base = 155, bw = 74;
   const gap = (W - items.length * bw) / (items.length + 1);
   let bars = '';
   items.forEach((it, i) => {
-    const h = Math.round((it.value / max) * 120);
+    const h = Math.round((dv(it.value) / max) * 120);
     const x = gap + i * (bw + gap);
     bars += `<rect x="${x}" y="${base - h}" width="${bw}" height="${h}" rx="5" fill="${it.color}"></rect>
-      <text x="${x + bw / 2}" y="${base - h - 8}" text-anchor="middle" font-size="12">${faNum(it.value)}</text>
+      <text x="${x + bw / 2}" y="${base - h - 8}" text-anchor="middle" font-size="12">${faNum(dv(it.value))}</text>
       <text x="${x + bw / 2}" y="${base + 20}" text-anchor="middle" font-size="13">${it.label}</text>`;
   });
   return `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img"><line x1="8" y1="${base}" x2="${W - 8}" y2="${base}" stroke="#dde3e8"/>${bars}</svg>`;
@@ -128,7 +212,7 @@ function barChart(items) {
 function donutChart(cats) {
   if (!cats || !cats.length) return '<div class="empty">هنوز هزینه‌ای ثبت نشده است</div>';
   const total = cats.reduce((a, c) => a + Number(c.total || 0), 0) || 1;
-  const colors = ['#102333', '#0e7c5b', '#b26a00', '#5b7fa6', '#b3261e', '#7a5ba6', '#3f8f6e'];
+  const colors = ['#102333', '#c9a227', '#a83a26', '#8fae94', '#5b7fa6', '#d9b96a', '#7a5ba6'];
   const R = 60, C = 2 * Math.PI * R;
   let offset = 0, segs = '', legend = '';
   cats.forEach((c, i) => {

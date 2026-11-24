@@ -11,8 +11,13 @@
 <!-- Login -->
 <div id="login-view" class="login-wrap">
   <form id="login-form" class="login-card">
-    <h1>پنل ERP فرزام</h1>
-    <p class="muted">سامانه مالی یکپارچه — ورود کاربران</p>
+    <div class="login-brand">
+      <div class="brand-logo">فرزام</div>
+      <div>
+        <h1>پنل یکپارچه مدیریت شرکت</h1>
+        <p class="muted">سامانه مالی فرزام — ورود کاربران</p>
+      </div>
+    </div>
     <label>ایمیل
       <input type="email" id="login-email" required autocomplete="username">
     </label>
@@ -27,21 +32,34 @@
 <!-- App -->
 <div id="app-view" class="hidden">
   <header class="topbar">
-    <div class="brand">پنل ERP فرزام</div>
-    <div class="userbox">
-      <span id="user-info"></span>
-      <button id="logout-btn" class="btn small">خروج</button>
+    <div class="brand-block">
+      <div class="brand-logo">فرزام</div>
+      <div>
+        <div class="brand-title">پنل یکپارچه مدیریت شرکت</div>
+        <div class="brand-sub muted">آخرین به‌روزرسانی: <span id="last-update">—</span></div>
+      </div>
+    </div>
+    <div class="top-controls">
+      <div class="unit-toggle" id="unit-toggle">
+        <button type="button" class="unit-btn active" data-unit="rial">ریال</button>
+        <button type="button" class="unit-btn" data-unit="toman">تومان</button>
+      </div>
+      <button type="button" id="refresh-btn" class="btn primary">به‌روزرسانی</button>
+      <div class="userbox">
+        <span id="user-info"></span>
+        <button type="button" id="logout-btn" class="btn small">خروج</button>
+      </div>
     </div>
   </header>
 
   <nav class="tabs" id="tabs">
     <button data-tab="dashboard" class="tab active">داشبورد</button>
-    <button data-tab="intake" class="tab">ورودی یکپارچه</button>
-    <button data-tab="expenses" class="tab">هزینه‌ها</button>
+    <button data-tab="intake" class="tab">ورودی یکپارچه<span class="tab-badge" id="badge-intake"></span></button>
+    <button data-tab="expenses" class="tab">هزینه‌ها<span class="tab-badge" id="badge-expenses"></span></button>
     <button data-tab="income" class="tab">درآمدها</button>
-    <button data-tab="payroll" class="tab">حقوق</button>
+    <button data-tab="payroll" class="tab">حقوق و دستمزد</button>
     <button data-tab="ledgers" class="tab">دفاتر و چک‌ها</button>
-    <button data-tab="customers" class="tab">مشتری‌ها</button>
+    <button data-tab="customers" class="tab">مشتری‌ها<span class="tab-badge" id="badge-customers"></span></button>
     <button data-tab="products" class="tab">کالاها</button>
     <button data-tab="knowledge" class="tab">دانش و قوانین</button>
   </nav>
@@ -58,7 +76,7 @@
     <section id="tab-knowledge" class="panel hidden"></section>
   </main>
 
-  <footer class="foot muted">واحد پول: ریال — تاریخ‌ها: شمسی</footer>
+  <footer class="foot muted">مبالغ به ریال ذخیره می‌شوند؛ واحد نمایش از بالای صفحه قابل تغییر است — تاریخ‌ها: شمسی</footer>
 </div>
 
 <script src="/app.js"></script>

@@ -293,6 +293,34 @@ agent.post('/knowledge', (req, res) => {
   return res.status(201).json(db.prepare('SELECT * FROM knowledge_entries WHERE id = ?').get(info.lastInsertRowid));
 });
 
+agent.get('/customers', (req, res) => {
+  res.json(db.prepare('SELECT * FROM customers ORDER BY id DESC LIMIT 500').all());
+});
+
+agent.post('/customers', (req, res) => {
+  const b = req.body || {};
+  if (!b.name) return res.status(400).json({ error: 'نام مشتری لازم است' });
+  const info = db.prepare('INSERT INTO customers (name, code, national_id, phone, notes) VALUES (?,?,?,?,?)')
+    .run(b.name, b.code || '', b.national_id || '', b.phone || '', b.notes || '');
+  audit('pip-agent', 'create', 'customers', Number(info.lastInsertRowid));
+  return res.status(201).json(db.prepare('SELECT * FROM customers WHERE id = ?').get(info.lastInsertRowid));
+});
+
+agent.get('/products', (req, res) => {
+  res.json(db.prepare('SELECT * FROM products ORDER BY id DESC LIMIT 500').all());
+});
+
+agent.post('/products', (req, res) => {
+  const b = req.body || {};
+  if (!b.name) return res.status(400).json({ error: 'نام کالا لازم است' });
+  const price = toIntAmount(b.sale_price_rial);
+  if (price === null || price < 0) return res.status(400).json({ error: 'قیمت نامعتبر است' });
+  const info = db.prepare('INSERT INTO products (name, code, unit, sale_price_rial, notes) VALUES (?,?,?,?,?)')
+    .run(b.name, b.code || '', b.unit || '', price, b.notes || '');
+  audit('pip-agent', 'create', 'products', Number(info.lastInsertRowid));
+  return res.status(201).json(db.prepare('SELECT * FROM products WHERE id = ?').get(info.lastInsertRowid));
+});
+
 agent.get('/analytics/summary', (req, res) => {
   res.json(analyticsSummary());
 });
