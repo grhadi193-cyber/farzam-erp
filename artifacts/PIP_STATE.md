@@ -15,7 +15,7 @@ Autonomous product execution on the EXISTING Farzam ERP (no rebuild, no new conn
 - Knowledge: 9 entries (5 standing rules + category chart, fixed assets, suppliers, 1405 controls).
 - Login: healthy (fixed 2026-11-24, commit b46aa69c — self-healing users-table repair at boot).
 - GitHub main head: bc6a1b16 (owner's own web edits to README.md + new main.yml, 2026-11-24 21:40–21:53 Tehran; last Pip sync b46aa69c, no path overlap with the pending push). Sync record: `~/workspace/farzam-erp-server.muse-github-snapshot-sync.json` (10 entries).
-- Mission batch: implemented + validated locally (smoke 15/15), NOT yet pushed — platform approval card expired 2026-11-24 ~22:37; awaiting the owner's «پوش کن».
+- Mission batch: implemented + validated locally (smoke 15/15) and PUSHED 2026-11-24 23:26 in 4 commits (b4a23c19, 3fc52611, 61b0c865, 8cd751f9) after the owner's «پوش کن». Production deployment lagging abnormally: as of 23:59 the live site still serves the pre-push build (no ledger_aging in analytics, old app.js) — a follow-up push retriggers the Vercel deployment; verification continues.
 
 ## Surrounding system (outside the repo)
 
