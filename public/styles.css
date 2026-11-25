@@ -199,6 +199,11 @@ tr:last-child td { border-bottom: none; }
 .empty { color: var(--muted); text-align: center; padding: 22px; background: var(--card); border: 1px dashed var(--border); border-radius: 16px; }
 svg text { font-family: inherit; }
 
+/* List filter (client-side search over rendered rows) */
+.list-filter { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; }
+.list-filter input { flex: 1; width: auto; }
+.list-filter .btn { flex: 0 0 auto; }
+
 /* Monitoring per-person bars */
 .pbar-track { background: #f1e8d2; border-radius: 999px; height: 9px; min-width: 90px; overflow: hidden; }
 .pbar { background: linear-gradient(90deg, var(--navy), var(--navy2)); height: 100%; border-radius: 999px; }

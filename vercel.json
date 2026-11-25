@@ -1,1 +1,1 @@
-{"rewrites":[{"destination":"/api/index.js","source":"/(.*)"}]}
+{"headers":[{"headers":[{"key":"Cache-Control","value":"no-cache, must-revalidate"}],"source":"/app.js"},{"headers":[{"key":"Cache-Control","value":"no-cache, must-revalidate"}],"source":"/styles.css"}],"rewrites":[{"destination":"/api/index.js","source":"/(.*)"}]}

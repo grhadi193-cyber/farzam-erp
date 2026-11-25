@@ -297,6 +297,56 @@ function repairUsersTable() {
 
 repairUsersTable();
 
+// ---------- General schema verification (read-only, all tables) ----------
+// The users repair above exists because CREATE TABLE IF NOT EXISTS never
+// upgrades an existing table: a stale table keeps its old columns forever
+// and queries against newer columns throw at runtime. The same silent
+// failure could hit any table after a future column addition, so at boot we
+// PRAGMA-compare every table against the columns the code expects and log a
+// LOUD, specific warning per missing column. This check NEVER alters a
+// table (auto-repair stays users-only); it only makes the drift visible in
+// the boot log instead of as a 500 on some later request. Failure-isolated:
+// an error here must never break boot.
+const EXPECTED_COLUMNS = {
+  users: USERS_REQUIRED_COLUMNS,
+  events: ['id', 'source', 'sender_name', 'sender_ref', 'raw_text', 'event_type', 'status', 'payload', 'receipt_image', 'created_at'],
+  expenses: ['id', 'event_id', 'date_shamsi', 'time_ir', 'person', 'telegram_ref', 'description', 'amount_rial', 'category', 'payment_method', 'tracking_no', 'receipt_date_time', 'receipt_status', 'review_status', 'record_folder', 'notes', 'receipt_image', 'created_at'],
+  income: ['id', 'event_id', 'date_shamsi', 'time_ir', 'person', 'telegram_ref', 'description', 'amount_rial', 'account_dest', 'payment_method', 'tracking_no', 'receipt_date_time', 'receipt_status', 'review_status', 'record_folder', 'notes', 'receipt_image', 'created_at'],
+  payroll: ['id', 'event_id', 'date_shamsi', 'time_ir', 'person', 'telegram_ref', 'description', 'basis', 'amount_rial', 'payment_method', 'tracking_no', 'receipt_date_time', 'receipt_status', 'review_status', 'record_folder', 'notes', 'receipt_image', 'created_at'],
+  ledger_items: ['id', 'kind', 'party', 'description', 'amount_rial', 'due_date_shamsi', 'status', 'cheque_sayad_no', 'created_at'],
+  customers: ['id', 'name', 'code', 'national_id', 'phone', 'notes', 'created_at'],
+  products: ['id', 'name', 'code', 'unit', 'sale_price_rial', 'notes', 'created_at'],
+  bank_accounts: ['id', 'name', 'bank', 'branch', 'iban', 'account_no', 'balance_rial', 'notes', 'created_at'],
+  knowledge_entries: ['id', 'title', 'body', 'kind', 'created_at'],
+  tasks: ['id', 'title', 'assignee', 'deadline', 'details', 'status', 'report', 'created_by', 'created_at', 'updated_at'],
+  questions: ['id', 'group_name', 'question', 'answer', 'status', 'created_at', 'answered_at'],
+  audit_log: ['id', 'actor', 'action', 'entity', 'entity_id', 'created_at'],
+};
+
+function verifySchema() {
+  for (const [table, expected] of Object.entries(EXPECTED_COLUMNS)) {
+    let cols = null;
+    try { cols = db.pragma(`table_info(${table})`); } catch (e) {
+      console.warn(`[db] SCHEMA WARNING: could not inspect table "${table}":`, e.message);
+      continue;
+    }
+    if (!Array.isArray(cols) || cols.length === 0) {
+      console.warn(`[db] SCHEMA WARNING: table "${table}" is missing entirely (expected columns: ${expected.join(', ')}) — no automatic alteration was made`);
+      continue;
+    }
+    const existing = cols.map((c) => c.name);
+    for (const col of expected) {
+      if (!existing.includes(col)) {
+        console.warn(`[db] SCHEMA WARNING: table "${table}" is missing column "${col}" — queries using it will fail; no automatic alteration was made`);
+      }
+    }
+  }
+}
+
+try { verifySchema(); } catch (e) {
+  console.warn('[db] schema verification failed (boot continues):', e.message);
+}
+
 // Migration for databases created before receipt photos existed: add the
 // receipt_image column (a data URL stored with the record) wherever missing.
 for (const table of ['events', 'expenses', 'income', 'payroll']) {
@@ -447,6 +497,54 @@ function classifyEvent(eventId, input, actor) {
   return { status: 200, body: { event: db.prepare('SELECT * FROM events WHERE id = ?').get(eventId), register_row: row } };
 }
 
+// ---------- Jalali due-date parsing (deterministic, no LLM math) ----------
+// due_date_shamsi is free text; accept Latin, Persian or Arabic digits and
+// '/' or '-' separators. Anything unparseable returns null and the item
+// falls into the no_due_date aging bucket — never guessed.
+const FA_DIGITS = '۰۱۲۳۴۵۶۷۸۹';
+const AR_DIGITS = '٠١٢٣٤٥٦٧٨٩';
+function latinDigits(s) {
+  return String(s ?? '')
+    .replace(/[۰-۹]/g, (d) => FA_DIGITS.indexOf(d))
+    .replace(/[٠-٩]/g, (d) => AR_DIGITS.indexOf(d));
+}
+const toFaDigits = (s) => String(s).replace(/\d/g, (d) => FA_DIGITS[d]);
+
+// Arithmetic Jalali day number (33-year-cycle algorithm). Only DIFFERENCES
+// between two day numbers are ever used, and "today" is converted with this
+// same function, so aging buckets are exact regardless of the epoch offset.
+function jalaliDayNumber(y, m, d) {
+  const gy = y + 1595;
+  let days = -355668 + 365 * gy + Math.floor(gy / 33) * 8 + Math.floor(((gy % 33) + 3) / 4) + d;
+  days += m < 7 ? (m - 1) * 31 : (m - 7) * 30 + 186;
+  return days;
+}
+
+function parseJalaliDate(text) {
+  const m = latinDigits(text).match(/(\d{3,4})\s*[/-]\s*(\d{1,2})\s*[/-]\s*(\d{1,2})/);
+  if (!m) return null;
+  const y = Number(m[1]);
+  const mo = Number(m[2]);
+  const d = Number(m[3]);
+  if (mo < 1 || mo > 12) return null;
+  if (d < 1 || d > (mo <= 6 ? 31 : 30)) return null;
+  return { y, m: mo, d, dayNumber: jalaliDayNumber(y, mo, d) };
+}
+
+// Today's Jalali date in Asia/Tehran via the ICU Persian calendar.
+function todayJalali() {
+  try {
+    const parts = new Intl.DateTimeFormat('en-u-ca-persian', {
+      timeZone: 'Asia/Tehran', year: 'numeric', month: 'numeric', day: 'numeric',
+    }).formatToParts(new Date());
+    const get = (t) => Number(parts.find((p) => p.type === t).value);
+    const y = get('year');
+    const m = get('month');
+    const d = get('day');
+    return { y, m, d, dayNumber: jalaliDayNumber(y, m, d) };
+  } catch (_) { return null; }
+}
+
 function analyticsSummary() {
   // Aggregate the dashboard's review metrics in SQL instead of transferring
   // hundreds of register rows (and their potentially large receipt images).
@@ -468,6 +566,56 @@ function analyticsSummary() {
   const unclear = db.prepare("SELECT COUNT(*) AS c FROM events WHERE event_type = 'unclear' OR status = 'needs_review'").get().c;
   const ledgerOpen = db.prepare("SELECT kind, COALESCE(SUM(amount_rial),0) AS total, COUNT(*) AS count FROM ledger_items WHERE status = 'باز' GROUP BY kind").all();
   const cashRow = db.prepare('SELECT COALESCE(SUM(balance_rial),0) AS s, COUNT(*) AS c FROM bank_accounts').get();
+  // Ledger aging: open items bucketed by Jalali due date vs today
+  // (Asia/Tehran). Items whose due date is missing or unparseable are
+  // counted in no_due_date — never guessed into a dated bucket.
+  const AGING_BUCKETS = ['no_due_date', 'current', 'overdue_1_30', 'overdue_31_90', 'overdue_90_plus'];
+  const emptyAging = () => Object.fromEntries(AGING_BUCKETS.map((b) => [b, { count: 0, total_rial: 0 }]));
+  const aging = emptyAging();
+  const agingByKind = { receivable: emptyAging(), payable: emptyAging(), cheque: emptyAging() };
+  const today = todayJalali();
+  const openItems = db.prepare("SELECT kind, amount_rial, due_date_shamsi FROM ledger_items WHERE status = 'باز'").all();
+  for (const it of openItems) {
+    const parsed = parseJalaliDate(it.due_date_shamsi);
+    let bucket = 'no_due_date';
+    if (parsed && today) {
+      const diff = today.dayNumber - parsed.dayNumber;
+      bucket = diff <= 0 ? 'current' : diff <= 30 ? 'overdue_1_30' : diff <= 90 ? 'overdue_31_90' : 'overdue_90_plus';
+    }
+    const amt = Number(it.amount_rial || 0);
+    aging[bucket].count += 1;
+    aging[bucket].total_rial += amt;
+    if (agingByKind[it.kind]) {
+      agingByKind[it.kind][bucket].count += 1;
+      agingByKind[it.kind][bucket].total_rial += amt;
+    }
+  }
+  // Review / anomaly signals, computed server-side with the same definitions
+  // the panel uses, so every consumer (UI, agent API, reports) reads one
+  // consistent set instead of re-deriving them.
+  const review = {
+    duplicate_expenses_rial: db.prepare("SELECT COALESCE(SUM(amount_rial),0) AS s FROM expenses WHERE review_status LIKE '%تکراری%'").get().s,
+    expenses_without_receipt: db.prepare("SELECT COUNT(*) AS c FROM expenses WHERE receipt_status = 'ندارد'").get().c,
+    attention_count: db.prepare(
+      "SELECT (SELECT COUNT(*) FROM expenses WHERE review_status != 'تأیید شده')"
+      + " + (SELECT COUNT(*) FROM income WHERE review_status != 'تأیید شده')"
+      + " + (SELECT COUNT(*) FROM payroll WHERE review_status != 'تأیید شده') AS c"
+    ).get().c,
+    // Distinct non-empty tracking numbers appearing on more than one row
+    // across all three registers — the reused-receipt signature.
+    reused_tracking_numbers: db.prepare(
+      'SELECT COUNT(*) AS c FROM (SELECT tracking_no FROM ('
+      + "SELECT tracking_no FROM expenses WHERE tracking_no IS NOT NULL AND TRIM(tracking_no) != '' "
+      + "UNION ALL SELECT tracking_no FROM income WHERE tracking_no IS NOT NULL AND TRIM(tracking_no) != '' "
+      + "UNION ALL SELECT tracking_no FROM payroll WHERE tracking_no IS NOT NULL AND TRIM(tracking_no) != ''"
+      + ') GROUP BY tracking_no HAVING COUNT(*) > 1)'
+    ).get().c,
+    zero_amount_with_receipt: db.prepare(
+      "SELECT (SELECT COUNT(*) FROM expenses WHERE amount_rial = 0 AND receipt_status = 'دارد')"
+      + " + (SELECT COUNT(*) FROM income WHERE amount_rial = 0 AND receipt_status = 'دارد')"
+      + " + (SELECT COUNT(*) FROM payroll WHERE amount_rial = 0 AND receipt_status = 'دارد') AS c"
+    ).get().c,
+  };
   return {
     cash: {
       accounts: cashRow.c,
@@ -495,6 +643,12 @@ function analyticsSummary() {
     unclear_count: unclear,
     expenses_by_category: byCategory,
     ledger_open: ledgerOpen,
+    review,
+    ledger_aging: {
+      today_shamsi: today ? toFaDigits(`${today.y}/${String(today.m).padStart(2, '0')}/${String(today.d).padStart(2, '0')}`) : null,
+      buckets: aging,
+      by_kind: agingByKind,
+    },
   };
 }
 

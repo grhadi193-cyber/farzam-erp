@@ -33,8 +33,28 @@ Every agent **write** inserts a row into `audit_log` with actor `pip-agent`, the
 | POST | `/api/agent/bank-accounts` | Create a bank account (audited). Body: `{ "name", "bank", "branch", "iban", "account_no", "balance_rial", "notes" }`; `name` is required, `balance_rial` is the integer Rial opening balance at creation, returns 201 with the row |
 | GET | `/api/agent/questions` | List the management questions (group, question, answer, status) |
 | POST | `/api/agent/questions/:id/answer` | Record management's answer (audited). Body: `{ "answer": "..." }`; sets the answer and marks the question «پاسخ داده شد», returns the updated row; 404 for an unknown id, 400 for an empty answer |
-| GET | `/api/agent/analytics/summary` | Totals per register (Rial), net, counts (incl. customers without national ID, open/total questions), unclear count, expenses by category, open ledgers, and `cash` (bank-account count and the sum of their opening balances) |
+| GET | `/api/agent/analytics/summary` | Totals per register (Rial), net, counts (incl. customers without national ID, open/total questions), unclear count, expenses by category, open ledgers, `cash` (bank-account count and the sum of their opening balances), `review` anomaly signals, and `ledger_aging` due-date buckets (see below) |
 | GET | `/api/agent/audit` | Latest audit-log rows |
+
+## Analytics additions: `review` and `ledger_aging`
+
+The summary response also carries two additive blocks (all pre-existing fields are unchanged):
+
+`review` — server-side anomaly signals, computed with the same definitions the panel uses:
+
+- `duplicate_expenses_rial` — sum of expense rows whose review status marks them as duplicates («تکراری»)
+- `expenses_without_receipt` — count of expense rows with `receipt_status` = ندارد
+- `attention_count` — register rows across all three registers whose `review_status` is not «تأیید شده»
+- `reused_tracking_numbers` — count of distinct non-empty `tracking_no` values that appear on more than one row across the three registers (the reused-receipt signature)
+- `zero_amount_with_receipt` — count of rows with `amount_rial` = 0 and `receipt_status` = دارد across the three registers
+
+`ledger_aging` — open ledger items (status «باز») bucketed by their Jalali `due_date_shamsi` against today in Asia/Tehran:
+
+- `today_shamsi` — today's Jalali date (Persian digits), the basis of the calculation
+- `buckets` — `{ no_due_date, current, overdue_1_30, overdue_31_90, overdue_90_plus }`, each `{ count, total_rial }`. `current` = due today or later; the overdue buckets are 1–30, 31–90, and 90+ days past due
+- `by_kind` — the same five buckets split by `receivable` / `payable` / `cheque`
+
+Due dates are parsed deterministically in code (Latin, Persian, or Arabic digits; `/` or `-` separators). A missing or unparseable due date is counted in `no_due_date` — it is never guessed into a dated bucket.
 
 ## Register row fields
 

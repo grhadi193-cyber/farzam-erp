@@ -13,6 +13,43 @@ const unitName = () => (unit === 'toman' ? 'تومان' : 'ریال');
 const faMoney = (n) => faNum(Math.round(Number(n || 0) / unitDiv())) + ' ' + unitName();
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
+// ---------- List filter (client-side only; filters already-rendered rows) ----------
+// Normalizes Arabic ي/ك to Persian ی/ک and Persian/Arabic digits to Latin, so
+// a query typed either way matches the rendered (Persian-digit) text.
+const normFa = (s) => String(s ?? '')
+  .replace(/ي/g, 'ی').replace(/ك/g, 'ک')
+  .replace(/[۰-۹]/g, (d) => '۰۱۲۳۴۵۶۷۸۹'.indexOf(d))
+  .replace(/[٠-٩]/g, (d) => '٠١٢٣٤٥٦٧٨٩'.indexOf(d))
+  .toLowerCase();
+
+function listFilterHTML(id, placeholder) {
+  return `<div class="list-filter"><input type="search" id="${id}" placeholder="${placeholder || 'جستجو در این فهرست…'}"><button type="button" class="btn small hidden" id="${id}-clear">پاک کردن</button></div><div class="empty hidden" id="${id}-empty" style="margin-bottom:12px">موردی با این جستجو پیدا نشد</div>`;
+}
+
+// itemsSel matches the filterable elements inside scopeEl (table rows or
+// cards). Table header rows (no <td>) are never hidden.
+function wireListFilter(id, itemsSel, scopeEl) {
+  const input = document.getElementById(id);
+  if (!input) return;
+  const clearBtn = document.getElementById(id + '-clear');
+  const emptyEl = document.getElementById(id + '-empty');
+  const items = $$(itemsSel, scopeEl);
+  const apply = () => {
+    const q = normFa(input.value.trim());
+    let visible = 0;
+    items.forEach((it) => {
+      if (it.tagName === 'TR' && !it.querySelector('td')) return; // header row
+      const hit = !q || normFa(it.textContent).includes(q);
+      it.classList.toggle('hidden', !hit);
+      if (hit) visible += 1;
+    });
+    if (clearBtn) clearBtn.classList.toggle('hidden', !q);
+    if (emptyEl) emptyEl.classList.toggle('hidden', visible > 0);
+  };
+  input.addEventListener('input', apply);
+  if (clearBtn) clearBtn.addEventListener('click', () => { input.value = ''; apply(); input.focus(); });
+}
+
 // ---------- Receipt photos ----------
 // Photos are compressed in the browser (canvas, max 1200px, JPEG 0.82) into a
 // data URL and stored with the record as receipt_image. No photo keeps the
@@ -272,6 +309,9 @@ async function loadDashboard() {
         ${kpi('مشتریان', faNum(c.customers), `${faNum(c.customers_without_id || 0)} نفر بدون شناسه ملی`)}
         ${kpi('پرسش‌های باز مدیریت', faNum(c.questions_open || 0), `از ${faNum(c.questions_total || 0)} پرسش رسمی بخش مالی`, c.questions_open ? 'warn-num' : '')}
       </div>
+      <div class="card" style="margin-bottom:12px"><h2 class="sec">حساب‌های بانکی</h2>
+        ${bankAccounts.length ? `<table><tr><th>حساب</th><th>بانک</th><th>مانده افتتاحیه (${unitName()})</th></tr>${bankAccounts.map((r) => `<tr><td>${esc(r.name)}</td><td>${esc(r.bank || '')}</td><td>${faMoney(r.balance_rial)}</td></tr>`).join('')}<tr><td colspan="2"><b>جمع نقد — مانده افتتاحیه حساب‌ها</b></td><td><b>${faMoney(cashTotal)}</b></td></tr></table>` : '<div class="empty">هنوز حساب بانکی ثبت نشده است</div>'}
+      </div>
       <div class="section-heading charts-heading"><div><span class="section-kicker">INSIGHTS</span><h2>تحلیل و گزارش‌ها</h2><p>تصویر واضح‌تری از جریان مالی کسب‌وکار</p></div></div>
       <div class="intake-banner">
         <div class="banner-head">
@@ -295,9 +335,6 @@ async function loadDashboard() {
       </div>
       <div class="card" style="margin-top:12px"><h2 class="sec">دفاتر باز</h2>
         ${s.ledger_open.length ? `<table><tr><th>نوع</th><th>تعداد</th><th>جمع (${unitName()})</th></tr>${s.ledger_open.map((r) => `<tr><td>${ledgerKindFa(r.kind)}</td><td>${faNum(r.count)}</td><td>${faMoney(r.total)}</td></tr>`).join('')}</table>` : '<div class="empty">دفتر بازی وجود ندارد</div>'}
-      </div>
-      <div class="card" style="margin-top:12px"><h2 class="sec">حساب‌های بانکی</h2>
-        ${bankAccounts.length ? `<table><tr><th>حساب</th><th>بانک</th><th>مانده افتتاحیه (${unitName()})</th></tr>${bankAccounts.map((r) => `<tr><td>${esc(r.name)}</td><td>${esc(r.bank || '')}</td><td>${faMoney(r.balance_rial)}</td></tr>`).join('')}<tr><td colspan="2"><b>جمع نقد — مانده افتتاحیه حساب‌ها</b></td><td><b>${faMoney(cashTotal)}</b></td></tr></table>` : '<div class="empty">هنوز حساب بانکی ثبت نشده است</div>'}
       </div>`;
     $$('#goto-intake, #goto-intake-banner', el).forEach((gi) => gi.addEventListener('click', () => loadTab('intake')));
   } catch (err) {
@@ -347,6 +384,7 @@ async function loadMonitoring() {
     const s = await api('/api/analytics/summary');
     const t = s.totals;
     const c = s.counts;
+    const rv = s.review || {};
     const rows = await api('/api/registers/expenses').catch(() => []);
     const questions = await api('/api/questions').catch(() => []);
     // Panel definitions, same as the dashboard.
@@ -376,6 +414,8 @@ async function loadMonitoring() {
     if (s.events.needs_review) alerts.push(`${faNum(s.events.needs_review)} رویداد در صف «نیازمند بررسی» منتظر تصمیم است`);
     const openQ = questions.filter((q) => q.status !== 'پاسخ داده شد').length;
     if (openQ) alerts.push(`${faNum(openQ)} پرسش مدیریت هنوز بی‌پاسخ است — پاسخ‌ها موجودی افتتاحیه و پیش‌بینی نقدینگی را روشن می‌کنند`);
+    if (rv.reused_tracking_numbers) alerts.push(`${faNum(rv.reused_tracking_numbers)} شماره پیگیری در بیش از یک رکورد تکرار شده است — نشانه رسید یا سند تکراری؛ ردیف‌های مربوط را در دفاتر بررسی کنید`);
+    if (rv.zero_amount_with_receipt) alerts.push(`${faNum(rv.zero_amount_with_receipt)} رکورد با مبلغ صفر ولی دارای رسید ثبت شده است — مبلغ باید از روی رسید خوانده و تکمیل شود`);
     if (!t.income_rial) alerts.push('هنوز درآمدی ثبت نشده است؛ تراز فقط خروجی‌ها را نشان می‌دهد، نه مانده حساب‌ها را');
     const quality = rows.length ? Math.round(100 * rows.filter((r) => r.receipt_status === 'دارد' || Number(r.amount_rial || 0) === 0).length / rows.length) : 100;
     // Rule-based analysis: every figure below is computed from the rows above.
@@ -397,6 +437,29 @@ async function loadMonitoring() {
     }
     if (!t.income_rial && !t.payroll_rial) analysis.push('درآمد و حقوقی هنوز ثبت نشده است؛ پس تراز فعلی فقط سمت خروجی شرکت را نشان می‌دهد و مانده حساب‌ها نیست.');
     if (openQ) analysis.push(`${faNum(openQ)} پرسش از ${faNum(questions.length)} پرسش رسمی بخش مالی هنوز بی‌پاسخ است؛ تا پاسخ‌ها نرسد، مانده‌های افتتاحیه و پیش‌بینی نقدینگی قابل ساخت نیست.`);
+    // Ledger aging card, rendered from the server's deterministic buckets.
+    const aging = s.ledger_aging;
+    let agingCard = '';
+    if (aging && aging.buckets) {
+      const B = aging.buckets;
+      const bucketRows = [
+        ['current', 'جاری — سررسید امروز یا آینده'],
+        ['overdue_1_30', 'سررسیدگذشته — ۱ تا ۳۰ روز'],
+        ['overdue_31_90', 'سررسیدگذشته — ۳۱ تا ۹۰ روز'],
+        ['overdue_90_plus', 'سررسیدگذشته — بیش از ۹۰ روز'],
+        ['no_due_date', 'بدون سررسید ثبت‌شده'],
+      ].map(([key, lbl]) => {
+        const b = B[key] || { count: 0, total_rial: 0 };
+        return `<tr><td>${lbl}</td><td>${faNum(b.count)}</td><td>${faMoney(b.total_rial)}</td></tr>`;
+      }).join('');
+      const datedCount = ['current', 'overdue_1_30', 'overdue_31_90', 'overdue_90_plus']
+        .reduce((a, k) => a + (B[k] ? B[k].count : 0), 0);
+      agingCard = `<div class="card" style="margin-top:12px"><h2 class="sec">سنی دفاتر باز</h2>
+        <div class="kpi-cap" style="margin-bottom:8px">مبنای محاسبه: سررسید شمسی هر مورد در برابر امروز (${esc(aging.today_shamsi || '—')})؛ موارد بدون سررسید جداگانه شمرده شده‌اند و حدس زده نشده‌اند.</div>
+        <table><tr><th>بازه</th><th>تعداد</th><th>جمع (${unitName()})</th></tr>${bucketRows}</table>
+        ${!datedCount && B.no_due_date && B.no_due_date.count ? '<div class="kpi-cap" style="margin-top:8px">برای هیچ مورد بازی سررسید ثبت نشده است؛ با ثبت سررسیدها این جدول معنادار می‌شود.</div>' : ''}
+      </div>`;
+    }
     const strip = (lbl, val, cls = '') => `<div class="card"><div class="lbl">${lbl}</div><div class="num ${cls}">${val}</div></div>`;
     el.innerHTML = `
       <div class="cards">
@@ -425,8 +488,13 @@ async function loadMonitoring() {
           <div class="kpi-cap">رکوردهای هزینه که هنوز «تأیید شده» نیستند — پردازش‌نشده: ${faNum(s.events.unprocessed)}، نیازمند بررسی: ${faNum(s.events.needs_review)}</div>
           <div class="kpi-lbl" style="margin-top:10px">مشتریان بدون شناسه ملی</div><div class="kpi-num">${faNum(c.customers_without_id || 0)}</div>
           <div class="kpi-cap">از ${faNum(c.customers)} مشتری ثبت‌شده در داده‌های پایه</div>
+          <div class="kpi-lbl" style="margin-top:10px">شماره‌های پیگیری تکراری</div><div class="kpi-num ${rv.reused_tracking_numbers ? 'warn-num' : ''}">${faNum(rv.reused_tracking_numbers || 0)}</div>
+          <div class="kpi-cap">شماره پیگیری‌هایی که در بیش از یک رکورد، در هر سه دفتر، تکرار شده‌اند (محاسبه سرور)</div>
+          <div class="kpi-lbl" style="margin-top:10px">رکورد صفرِ دارای رسید</div><div class="kpi-num ${rv.zero_amount_with_receipt ? 'warn-num' : ''}">${faNum(rv.zero_amount_with_receipt || 0)}</div>
+          <div class="kpi-cap">رکوردهایی با مبلغ صفر که رسید دارند و مبلغشان باید تکمیل شود (محاسبه سرور)</div>
         </div>
       </div>
+      ${agingCard}
       <div class="card" style="margin-top:12px"><h2 class="sec">هشدارهای خودکار</h2>
         ${alerts.length ? `<ul style="margin:0;padding-inline-start:18px">${alerts.map((a) => `<li>${esc(a)}</li>`).join('')}</ul>` : '<div class="empty">هشداری نیست — داده‌ها کامل‌اند</div>'}
       </div>
@@ -562,6 +630,7 @@ async function loadRegister(kind) {
       <button class="btn primary" type="submit">ثبت</button>
     </form>` : ''}
     <div class="card" style="margin-bottom:12px"><span class="lbl">جمع ${conf.title}: </span><b>${faMoney(total)}</b> — ${faNum(rows.length)} رکورد</div>
+    ${rows.length ? listFilterHTML('filter-' + kind, `جستجو در ${conf.title}…`) : ''}
     ${rows.length ? `<div style="overflow-x:auto"><table><tr>${conf.cols.map((c) => `<th>${c[1]}</th>`).join('')}<th>وضعیت بررسی</th>${canWrite() ? '<th></th>' : ''}</tr>
       ${rows.map((r) => `<tr>
         ${conf.cols.map(([name, , kind2]) => (name === 'receipt_status'
@@ -591,6 +660,7 @@ async function loadRegister(kind) {
     try { await api(`/api/registers/${kind}/${btn.dataset.id}`, { method: 'PATCH', body: { review_status: sel.value } }); loadRegister(kind); }
     catch (err) { alert(err.message); }
   }));
+  wireListFilter('filter-' + kind, 'table tr', el);
 }
 
 // ---------- Ledgers ----------
@@ -614,6 +684,7 @@ async function loadLedgers() {
       </div>
       <button class="btn primary" type="submit">ثبت</button>
     </form>` : ''}
+    ${rows.length ? listFilterHTML('filter-ledgers', 'جستجو در دفاتر…') : ''}
     ${rows.length ? `<div style="overflow-x:auto"><table><tr><th>نوع</th><th>طرف حساب</th><th>شرح</th><th>مبلغ</th><th>سررسید</th><th>صیادی</th><th>وضعیت</th>${canWrite() ? '<th></th>' : ''}</tr>
       ${rows.map((r) => `<tr><td>${ledgerKindFa(r.kind)}</td><td>${esc(r.party)}</td><td>${esc(r.description)}</td><td>${faMoney(r.amount_rial)}</td><td>${esc(r.due_date_shamsi || '')}</td><td>${esc(r.cheque_sayad_no || '')}</td>
       <td>${canWrite() ? `<select class="lg-sel" data-id="${r.id}">${['باز', 'تسویه شده', 'برگشتی'].map((s) => `<option ${s === r.status ? 'selected' : ''}>${s}</option>`).join('')}</select>` : `<span class="badge">${esc(r.status)}</span>`}</td>
@@ -632,6 +703,7 @@ async function loadLedgers() {
     try { await api(`/api/ledgers/${btn.dataset.id}`, { method: 'PATCH', body: { status: sel.value } }); loadLedgers(); }
     catch (err) { alert(err.message); }
   }));
+  wireListFilter('filter-ledgers', 'table tr', el);
 }
 
 // ---------- Customers / Products ----------
@@ -646,6 +718,7 @@ async function loadCustomers() {
         <label>شناسه / کد ملی<input name="national_id"></label><label>تلفن<input name="phone"></label>
         <label>توضیحات<input name="notes"></label>
       </div><button class="btn primary" type="submit">ثبت</button></form>` : ''}
+    ${rows.length ? listFilterHTML('filter-customers', 'جستجو در مشتریان…') : ''}
     ${rows.length ? `<table><tr><th>نام</th><th>کد</th><th>شناسه ملی</th><th>تلفن</th><th>توضیحات</th></tr>
       ${rows.map((r) => `<tr><td>${esc(r.name)}</td><td>${esc(r.code || '')}</td><td>${esc(r.national_id || '')}</td><td>${esc(r.phone || '')}</td><td>${esc(r.notes || '')}</td></tr>`).join('')}</table>`
       : '<div class="empty">هنوز مشتری‌ای ثبت نشده است</div>'}`;
@@ -657,6 +730,7 @@ async function loadCustomers() {
     try { await api('/api/customers', { method: 'POST', body }); loadCustomers(); }
     catch (err) { alert(err.message); }
   });
+  wireListFilter('filter-customers', 'table tr', el);
 }
 
 async function loadProducts() {
@@ -671,6 +745,7 @@ async function loadProducts() {
         <label>قیمت فروش (ریال)<input name="sale_price_rial" type="number" min="0"></label>
         <label>توضیحات<input name="notes"></label>
       </div><button class="btn primary" type="submit">ثبت</button></form>` : ''}
+    ${rows.length ? listFilterHTML('filter-products', 'جستجو در کالاها…') : ''}
     ${rows.length ? `<table><tr><th>نام</th><th>کد</th><th>واحد</th><th>قیمت فروش</th><th>توضیحات</th></tr>
       ${rows.map((r) => `<tr><td>${esc(r.name)}</td><td>${esc(r.code || '')}</td><td>${esc(r.unit || '')}</td><td>${faMoney(r.sale_price_rial)}</td><td>${esc(r.notes || '')}</td></tr>`).join('')}</table>`
       : '<div class="empty">هنوز کالایی ثبت نشده است</div>'}`;
@@ -682,6 +757,7 @@ async function loadProducts() {
     try { await api('/api/products', { method: 'POST', body }); loadProducts(); }
     catch (err) { alert(err.message); }
   });
+  wireListFilter('filter-products', 'table tr', el);
 }
 
 // ---------- Knowledge ----------
@@ -727,6 +803,7 @@ async function loadTasks() {
         <label>مهلت (شمسی)<input name="deadline" placeholder="۱۴۰۵/۰۹/۱۰"></label>
         <label style="grid-column: span 2">جزئیات<textarea name="details" rows="2"></textarea></label>
       </div><button class="btn primary" type="submit">تعریف وظیفه</button></form>` : ''}
+    ${rows.length ? listFilterHTML('filter-tasks', 'جستجو در وظایف…') : ''}
     ${rows.length ? rows.map((r) => `<div class="kitem">
       <h3>${esc(r.title)} <span class="badge ${taskStatusCls(r.status)}">${esc(r.status)}</span></h3>
       <div class="muted">مسئول: ${esc(r.assignee || '—')} · مهلت: ${esc(r.deadline || '—')} · تعریف‌کننده: ${esc(r.created_by || '—')}</div>
@@ -753,6 +830,7 @@ async function loadTasks() {
     try { await api(`/api/tasks/${id}`, { method: 'PATCH', body: { status, report } }); loadTasks(); }
     catch (err) { alert(err.message); }
   }));
+  wireListFilter('filter-tasks', '.kitem', el);
 }
 
 // ---------- Management questions ----------

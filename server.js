@@ -26,7 +26,19 @@ const app = express();
 // 4mb so a receipt photo data URL (validated to ~2,000,000 chars) plus the
 // rest of the JSON body always fits.
 app.use(express.json({ limit: '4mb' }));
-app.use(express.static(path.join(__dirname, 'public')));
+// Static assets: app.js / styles.css must be revalidated on every load so a
+// deploy is never masked by a stale browser cache (the same policy lives in
+// vercel.json for the Vercel filesystem path); images get a short max-age.
+app.use(express.static(path.join(__dirname, 'public'), {
+  setHeaders(res, filePath) {
+    const base = path.basename(filePath);
+    if (base === 'app.js' || base === 'styles.css') {
+      res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+    } else if (/\.(png|jpe?g|svg|gif|ico|webp)$/i.test(base)) {
+      res.setHeader('Cache-Control', 'public, max-age=86400');
+    }
+  },
+}));
 
 const PORT = Number(process.env.PORT || 3000);
 const WRITE_ROLES = ['admin', 'finance'];

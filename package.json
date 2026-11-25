@@ -1,9 +1,9 @@
 {
   "dependencies": {
     "bcryptjs": "^2.4.3",
-    "libsql": "^0.5.0",
     "express": "^4.21.2",
-    "jsonwebtoken": "^9.0.2"
+    "jsonwebtoken": "^9.0.2",
+    "libsql": "^0.5.0"
   },
   "description": "Farzam ERP — standalone server version (Persian RTL finance panel with agent API)",
   "engines": {
@@ -14,7 +14,7 @@
   "private": true,
   "scripts": {
     "start": "node server.js",
-    "test": "node --test"
+    "test": "node scripts/smoke.mjs"
   },
   "version": "0.1.0"
 }
