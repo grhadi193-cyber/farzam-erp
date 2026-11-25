@@ -10,79 +10,57 @@
 
 <!-- Login -->
 <div id="login-view" class="login-wrap">
+  <div class="login-intro"><div class="login-mark"><img src="/logo.svg" alt=""></div><div class="eyebrow">FARZAM ERP / WORKSPACE</div><h2>همه‌چیز تحت کنترل،<br><span>همه‌چیز در یک نگاه.</span></h2><p>فضای یکپارچه مدیریت مالی و عملیات فرزام؛ جایی برای تصمیم‌های دقیق‌تر و کارهای ساده‌تر.</p><div class="intro-line"><span></span> همراه کسب‌وکار شما</div></div>
   <form id="login-form" class="login-card">
-    <div class="login-brand">
-      <img src="/typography.svg" alt="فرزام" class="brand-logo-img">
-      <div>
-        <h1>پنل یکپارچه مدیریت شرکت</h1>
-        <p class="muted">سامانه مالی فرزام — ورود کاربران</p>
-      </div>
-    </div>
-    <label>ایمیل
-      <input type="email" id="login-email" required autocomplete="username">
-    </label>
-    <label>رمز عبور
-      <input type="password" id="login-password" required autocomplete="current-password">
-    </label>
-    <button type="submit" class="btn primary block">ورود</button>
-    <div id="login-error" class="error"></div>
+    <img src="/typography.svg" alt="فرزام" class="login-logo">
+    <div class="login-heading"><span class="eyebrow">خوش آمدید</span><h1>ورود به فضای کار</h1><p>برای ادامه، اطلاعات حساب خود را وارد کنید.</p></div>
+    <label>ایمیل<input type="email" id="login-email" required autocomplete="username" placeholder="name@company.com" dir="ltr"></label>
+    <label>رمز عبور<input type="password" id="login-password" required autocomplete="current-password" placeholder="رمز عبور خود را وارد کنید"></label>
+    <button type="submit" class="btn primary block">ورود به پنل <span aria-hidden="true">←</span></button>
+    <div id="login-error" class="error" role="alert"></div>
+    <div class="login-foot">فضای امن مدیریت فرزام <span>✦</span> FARZAM ERP</div>
   </form>
 </div>
 
-<!-- App -->
 <div id="app-view" class="hidden">
-  <header class="topbar">
-    <div class="brand-block">
-      <img src="/typography.svg" alt="فرزام" class="brand-logo-img">
-      <div>
-        <div class="brand-title">پنل یکپارچه مدیریت شرکت</div>
-        <div class="brand-sub muted" id="data-status">آخرین به‌روزرسانی: —</div>
+  <aside class="sidebar">
+    <div class="side-brand"><div class="side-logo"><img src="/logo.svg" alt=""></div><div><strong>فرزام</strong><small>فضای مدیریت یکپارچه</small></div><span class="brand-spark">✳</span></div>
+    <div class="nav-caption">منوی اصلی <span>WORKSPACE</span></div>
+    <nav class="tabs" id="tabs" aria-label="بخش‌های پنل">
+      <button data-tab="dashboard" class="tab active"><span class="nav-icon">◫</span>داشبورد</button>
+      <button data-tab="intake" class="tab"><span class="nav-icon">▣</span>ورودی یکپارچه<span class="tab-badge" id="badge-intake"></span></button>
+      <button data-tab="monitoring" class="tab"><span class="nav-icon">◷</span>مانیتورینگ و تحلیل</button>
+      <div class="nav-caption nav-section">مدیریت مالی</div>
+      <button data-tab="expenses" class="tab"><span class="nav-icon">↗</span>هزینه‌ها<span class="tab-badge" id="badge-expenses"></span></button>
+      <button data-tab="income" class="tab"><span class="nav-icon">↙</span>درآمدها</button>
+      <button data-tab="ledgers" class="tab"><span class="nav-icon">▤</span>دفاتر و چک‌ها</button>
+      <button data-tab="payroll" class="tab"><span class="nav-icon">♙</span>حقوق و دستمزد</button>
+      <div class="nav-caption nav-section">سازمان</div>
+      <button data-tab="customers" class="tab"><span class="nav-icon">♧</span>مشتریان<span class="tab-badge" id="badge-customers"></span></button>
+      <button data-tab="products" class="tab"><span class="nav-icon">◇</span>کالاها</button>
+      <button data-tab="tasks" class="tab"><span class="nav-icon">☑</span>وظایف<span class="tab-badge" id="badge-tasks"></span></button>
+      <button data-tab="questions" class="tab"><span class="nav-icon">◉</span>پرسش‌های مدیریت<span class="tab-badge" id="badge-questions"></span></button>
+      <button data-tab="knowledge" class="tab"><span class="nav-icon">▧</span>دانش و قوانین</button>
+    </nav>
+    <div class="side-bottom"><span class="side-bottom-icon">✳</span><div><strong>فرزام، همراه رشد شما</strong><small>پنل مدیریت کسب‌وکار</small></div></div>
+  </aside>
+  <div class="workspace">
+    <header class="topbar">
+      <div class="top-title"><span class="top-overline">FARZAM / WORKSPACE</span><strong id="page-title">داشبورد</strong></div>
+      <div class="top-controls">
+        <span class="today" id="today"></span>
+        <div class="unit-toggle" id="unit-toggle" aria-label="واحد نمایش مبلغ"><button type="button" class="unit-btn active" data-unit="rial">ریال</button><button type="button" class="unit-btn" data-unit="toman">تومان</button></div>
+        <button type="button" id="refresh-btn" class="refresh-button" title="به‌روزرسانی" aria-label="به‌روزرسانی">↻</button>
+        <div class="userbox"><span class="avatar">ف</span><span id="user-info"></span><button type="button" id="logout-btn" class="logout-btn">خروج</button></div>
       </div>
-    </div>
-    <div class="top-controls">
-      <div class="unit-toggle" id="unit-toggle">
-        <button type="button" class="unit-btn active" data-unit="rial">ریال</button>
-        <button type="button" class="unit-btn" data-unit="toman">تومان</button>
-      </div>
-      <button type="button" id="refresh-btn" class="btn primary">به‌روزرسانی</button>
-      <div class="userbox">
-        <span id="user-info"></span>
-        <button type="button" id="logout-btn" class="btn small">خروج</button>
-      </div>
-    </div>
-  </header>
-
-  <nav class="tabs" id="tabs">
-    <button data-tab="dashboard" class="tab active">داشبورد</button>
-    <button data-tab="intake" class="tab">ورودی یکپارچه<span class="tab-badge" id="badge-intake"></span></button>
-    <button data-tab="monitoring" class="tab">مانیتورینگ و تحلیل</button>
-    <button data-tab="expenses" class="tab">هزینه‌ها<span class="tab-badge" id="badge-expenses"></span></button>
-    <button data-tab="customers" class="tab">مشتریان<span class="tab-badge" id="badge-customers"></span></button>
-    <button data-tab="ledgers" class="tab">دفاتر و چک‌ها</button>
-    <button data-tab="payroll" class="tab">حقوق و دستمزد</button>
-    <button data-tab="income" class="tab">درآمدها</button>
-    <button data-tab="products" class="tab">کالاها</button>
-    <button data-tab="tasks" class="tab">وظایف<span class="tab-badge" id="badge-tasks"></span></button>
-    <button data-tab="questions" class="tab">پرسش‌های مدیریت<span class="tab-badge" id="badge-questions"></span></button>
-    <button data-tab="knowledge" class="tab">دانش و قوانین</button>
-  </nav>
-
-  <main>
-    <section id="tab-dashboard" class="panel"></section>
-    <section id="tab-intake" class="panel hidden"></section>
-    <section id="tab-monitoring" class="panel hidden"></section>
-    <section id="tab-expenses" class="panel hidden"></section>
-    <section id="tab-customers" class="panel hidden"></section>
-    <section id="tab-ledgers" class="panel hidden"></section>
-    <section id="tab-payroll" class="panel hidden"></section>
-    <section id="tab-income" class="panel hidden"></section>
-    <section id="tab-products" class="panel hidden"></section>
-    <section id="tab-tasks" class="panel hidden"></section>
-    <section id="tab-questions" class="panel hidden"></section>
-    <section id="tab-knowledge" class="panel hidden"></section>
-  </main>
-
-  <footer class="foot muted">مبالغ به ریال ذخیره می‌شوند؛ واحد نمایش از بالای صفحه قابل تغییر است — تاریخ‌ها: شمسی</footer>
+    </header>
+    <div class="mobile-nav-label">بخش‌های پنل <span>← برای دیدن بیشتر بکشید</span></div>
+    <main>
+      <div class="page-heading"><div><div class="page-breadcrumb">فضای کار <span>/</span> <span id="breadcrumb-title">داشبورد</span></div><h1 id="content-title">داشبورد</h1><p id="page-description">نمایی کلی از وضعیت کسب‌وکار شما، در یک نگاه.</p></div><div class="status-pill"><span></span> <span id="data-status">در حال دریافت اطلاعات</span></div></div>
+      <section id="tab-dashboard" class="panel"></section><section id="tab-intake" class="panel hidden"></section><section id="tab-monitoring" class="panel hidden"></section><section id="tab-expenses" class="panel hidden"></section><section id="tab-customers" class="panel hidden"></section><section id="tab-ledgers" class="panel hidden"></section><section id="tab-payroll" class="panel hidden"></section><section id="tab-income" class="panel hidden"></section><section id="tab-products" class="panel hidden"></section><section id="tab-tasks" class="panel hidden"></section><section id="tab-questions" class="panel hidden"></section><section id="tab-knowledge" class="panel hidden"></section>
+    </main>
+    <footer class="foot muted"><span>© فرزام — فضای مدیریت یکپارچه</span><span>مبالغ به ریال ذخیره می‌شوند · تاریخ‌ها شمسی</span></footer>
+  </div>
 </div>
 
 <script src="/app.js?v=2"></script>
